@@ -10,7 +10,7 @@ from tinyserve.engine import Engine
 from tinyserve.kv_cache import ContiguousKVCache, KVPool
 from tinyserve.model import TinyGPT
 from tinyserve.request import FinishReason, Request, SamplingParams
-from tinyserve.scheduler import NaiveScheduler, StaticScheduler
+from tinyserve.scheduler import ContinuousScheduler, NaiveScheduler, StaticScheduler
 
 GREEDY = SamplingParams(max_new_tokens=12, ignore_eos=True)
 
@@ -120,3 +120,67 @@ def test_static_respects_kv_capacity(model: TinyGPT) -> None:
     engine = Engine(model, StaticScheduler(contiguous_kv(2), max_batch_size=4), record_trace=True)
     engine.generate(make_prompts(5), GREEDY)
     assert max(t.num_prefill + t.num_decode for t in engine.trace) == 2
+
+
+def test_continuous_matches_reference(model: TinyGPT) -> None:
+    prompts = make_prompts(9, seed=2)
+    params = [
+        SamplingParams(max_new_tokens=n, ignore_eos=True) for n in (3, 15, 7, 1, 12, 9, 4, 20, 6)
+    ]
+    engine = Engine(model, ContinuousScheduler(contiguous_kv(4), max_batch_size=4))
+    reqs = [Request(p, sp) for p, sp in zip(prompts, params, strict=True)]
+    for r in reqs:
+        engine.add_request(r)
+    while engine.has_unfinished():
+        engine.step()
+    for r in reqs:
+        assert r.output_ids == reference_generate(model, r.prompt_ids, r.params)
+
+
+def test_continuous_refills_seats_immediately(model: TinyGPT) -> None:
+    """Same workload as the static test: the third request boards right after the first ends."""
+    engine = Engine(
+        model, ContinuousScheduler(contiguous_kv(2), max_batch_size=2), record_trace=True
+    )
+    lengths = [2, 10, 3]
+    reqs = [
+        Request(p, SamplingParams(max_new_tokens=n, ignore_eos=True))
+        for p, n in zip(make_prompts(3), lengths, strict=True)
+    ]
+    for r in reqs:
+        engine.add_request(r)
+    while engine.has_unfinished():
+        engine.step()
+    third_prefill = next(
+        i
+        for i, t in enumerate(engine.trace)
+        if any(rid == reqs[2].request_id for rid, _ in t.slots.values())
+    )
+    assert third_prefill == lengths[0]
+    # Prefill of the newcomer and decode of the others happen in the same step.
+    assert engine.trace[third_prefill].num_prefill == 1
+    assert engine.trace[third_prefill].num_decode == 1
+    # The whole workload takes as long as the longest request, not the sum of batches.
+    assert engine.num_steps == lengths[1]
+
+
+def test_continuous_respects_max_batch_size(model: TinyGPT) -> None:
+    engine = Engine(
+        model, ContinuousScheduler(contiguous_kv(8), max_batch_size=3), record_trace=True
+    )
+    engine.generate(make_prompts(10), GREEDY)
+    assert max(t.num_running for t in engine.trace) == 3
+    assert max(len(t.slots) for t in engine.trace) == 3
+
+
+def test_continuous_respects_token_budget(model: TinyGPT) -> None:
+    """With a budget of 40 tokens per step, two 30-token prompts cannot prefill together."""
+    sched = ContinuousScheduler(contiguous_kv(4), max_batch_size=4, max_tokens_per_step=40)
+    engine = Engine(model, sched, record_trace=True)
+    params = SamplingParams(max_new_tokens=5, ignore_eos=True)
+    for _ in range(2):
+        engine.add_request(Request([7] * 30, params))
+    while engine.has_unfinished():
+        engine.step()
+    assert [t.num_prefill for t in engine.trace[:2]] == [1, 1]
+    assert all(t.num_prefill_tokens + t.num_decode <= 40 for t in engine.trace)

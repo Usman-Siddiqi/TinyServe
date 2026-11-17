@@ -22,9 +22,14 @@ from tinyserve.kv_cache import ContiguousKVCache, KVCacheManager, KVPool, KVUsag
 from tinyserve.model import ModelConfig, TinyGPT
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
-from tinyserve.scheduler import NaiveScheduler, Scheduler, StaticScheduler
+from tinyserve.scheduler import (
+    ContinuousScheduler,
+    NaiveScheduler,
+    Scheduler,
+    StaticScheduler,
+)
 
-STRATEGIES = ("naive", "static")
+STRATEGIES = ("naive", "static", "continuous")
 
 
 @dataclass(frozen=True)
@@ -172,6 +177,7 @@ class EngineConfig:
         kv_capacity_tokens: size of the KV pool, in token slots. Every strategy
             gets the same pool so comparisons are apples to apples.
         max_batch_size: most requests running at once (ignored by ``naive``).
+        max_tokens_per_step: per-step token budget of the continuous scheduler.
         num_threads: PyTorch intra-op threads (None leaves the default).
     """
 
@@ -179,6 +185,7 @@ class EngineConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     kv_capacity_tokens: int = 8192
     max_batch_size: int = 32
+    max_tokens_per_step: int = 2048
     num_threads: int | None = None
 
 
@@ -195,6 +202,8 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     scheduler: Scheduler
     if cfg.strategy == "naive":
         scheduler = NaiveScheduler(kv)
-    else:
+    elif cfg.strategy == "static":
         scheduler = StaticScheduler(kv, cfg.max_batch_size)
+    else:
+        scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step)
     return Engine(model, scheduler, record_trace=record_trace)
