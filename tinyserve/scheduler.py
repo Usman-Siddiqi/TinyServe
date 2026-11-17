@@ -1,0 +1,146 @@
+"""Schedulers decide, at every engine step, which requests run and in which phase.
+
+All schedulers share the same bookkeeping (a FIFO ``waiting`` queue and a
+``running`` list) and differ only in their admission policy:
+
+* :class:`NaiveScheduler` serves one request at a time, start to finish. Think
+  of a **taxi**: one passenger, door to door, everybody else waits at the curb.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections import deque
+from dataclasses import dataclass, field
+
+from tinyserve.kv_cache import KVCacheManager
+from tinyserve.request import FinishReason, Request, RequestStatus
+
+
+@dataclass
+class SchedulerOutput:
+    """What to run in one engine step.
+
+    Attributes:
+        prefill: requests that need their whole sequence processed this step.
+        decode: requests that generate one token this step.
+        preempted: requests that were kicked out of memory to make room.
+    """
+
+    prefill: list[Request] = field(default_factory=list)
+    decode: list[Request] = field(default_factory=list)
+    preempted: list[Request] = field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        """True if there is nothing to run."""
+        return not self.prefill and not self.decode
+
+    @property
+    def num_tokens(self) -> int:
+        """Tokens processed by the model this step."""
+        return sum(r.length for r in self.prefill) + len(self.decode)
+
+
+class Scheduler(ABC):
+    """Shared queue/slot bookkeeping. Subclasses implement :meth:`schedule`.
+
+    Args:
+        kv: the KV cache manager whose memory this scheduler hands out.
+        max_batch_size: most requests that may be running at the same time.
+    """
+
+    name = "base"
+
+    def __init__(self, kv: KVCacheManager, max_batch_size: int) -> None:
+        if max_batch_size < 1:
+            raise ValueError("max_batch_size must be >= 1")
+        self.kv = kv
+        self.max_batch_size = max_batch_size
+        self.waiting: deque[Request] = deque()
+        self.running: list[Request] = []
+        # Each running request occupies a numbered "seat" in the batch. Seats are
+        # purely for visualizing who sits where; the model never sees them.
+        self.slot_of: dict[int, int] = {}
+        self._free_slots = list(range(max_batch_size - 1, -1, -1))
+        self.num_preemptions = 0
+
+    def add(self, request: Request) -> None:
+        """Queue a new request."""
+        request.status = RequestStatus.WAITING
+        self.waiting.append(request)
+
+    def has_unfinished(self) -> bool:
+        """True while any request is waiting or running."""
+        return bool(self.waiting or self.running)
+
+    @abstractmethod
+    def schedule(self) -> SchedulerOutput:
+        """Pick the work for the next engine step."""
+
+    def finish_step(self) -> list[Request]:
+        """Release memory and seats of requests that finished this step. Returns them."""
+        done = [r for r in self.running if r.is_finished]
+        for req in done:
+            self._release(req)
+        return done
+
+    def abort(self, request_id: int, now: float) -> Request | None:
+        """Cancel a request wherever it is (e.g. the client disconnected)."""
+        for req in list(self.waiting):
+            if req.request_id == request_id:
+                self.waiting.remove(req)
+                req.finish(FinishReason.ABORTED, now)
+                return req
+        for req in self.running:
+            if req.request_id == request_id:
+                req.finish(FinishReason.ABORTED, now)
+                self._release(req)
+                return req
+        return None
+
+    # --- helpers for subclasses ----------------------------------------------------
+
+    def _admit(self, request: Request) -> bool:
+        """Move the head of the waiting queue into the batch, if its KV memory fits."""
+        if not self.kv.allocate(request.request_id, request.length):
+            return False
+        assert self.waiting[0] is request, "requests are admitted in FIFO order"
+        self.waiting.popleft()
+        request.status = RequestStatus.RUNNING
+        self.running.append(request)
+        self.slot_of[request.request_id] = self._free_slots.pop()
+        return True
+
+    def _release(self, request: Request) -> None:
+        """Take a request out of the batch and free its KV memory."""
+        self.running.remove(request)
+        self.kv.free(request.request_id)
+        self._free_slots.append(self.slot_of.pop(request.request_id))
+        self._free_slots.sort(reverse=True)  # keep handing out the lowest seat first
+
+    def _grow_or_fail(self, request: Request) -> None:
+        """Reserve KV room for the token a decode step is about to write."""
+        if not self.kv.grow(request.request_id, request.length):
+            raise RuntimeError(
+                f"{self.name} scheduler ran out of KV memory; it does not support preemption"
+            )
+
+
+class NaiveScheduler(Scheduler):
+    """One request at a time, from first token to last. Baseline #1 (the taxi)."""
+
+    name = "naive"
+
+    def __init__(self, kv: KVCacheManager) -> None:
+        super().__init__(kv, max_batch_size=1)
+
+    def schedule(self) -> SchedulerOutput:
+        """Decode the current request, or start the next one if the taxi is empty."""
+        if not self.running:
+            if self.waiting and self._admit(self.waiting[0]):
+                return SchedulerOutput(prefill=[self.running[0]])
+            return SchedulerOutput()
+        for req in self.running:
+            self._grow_or_fail(req)
+        return SchedulerOutput(decode=list(self.running))
