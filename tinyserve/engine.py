@@ -224,7 +224,7 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         torch.set_num_threads(cfg.num_threads)
     m = cfg.model
     model = TinyGPT(m)
-    pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_heads, m.head_dim)
+    pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_kv_heads, m.head_dim)
     kv: KVCacheManager
     if cfg.kv_layout == "paged":
         kv = PagedKVCache(pool, cfg.block_size)

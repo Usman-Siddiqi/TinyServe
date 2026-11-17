@@ -8,7 +8,7 @@ memory, and *how it is laid out* decides how many requests fit at once.
 This module splits the problem in two:
 
 * :class:`KVPool` is dumb storage: per layer, one flat tensor of ``num_slots``
-  token slots, each holding a key and a value of shape ``(n_heads, head_dim)``.
+  token slots, each holding a key and a value of shape ``(n_kv_heads, head_dim)``.
 * A :class:`KVCacheManager` owns the bookkeeping: which slots belong to which
   sequence. It turns "token ``j`` of sequence ``s``" into a physical slot address.
 
@@ -38,12 +38,12 @@ class KVPool:
         self,
         num_slots: int,
         n_layers: int,
-        n_heads: int,
+        n_kv_heads: int,
         head_dim: int,
         dtype: torch.dtype = torch.float32,
     ) -> None:
         self.num_slots = num_slots
-        shape = (n_layers, num_slots, n_heads, head_dim)
+        shape = (n_layers, num_slots, n_kv_heads, head_dim)
         self.k = torch.zeros(shape, dtype=dtype)
         self.v = torch.zeros(shape, dtype=dtype)
 
@@ -51,6 +51,22 @@ class KVPool:
     def nbytes(self) -> int:
         """Total bytes held by the pool (keys + values, all layers)."""
         return self.k.nbytes + self.v.nbytes
+
+
+@dataclass
+class AttentionGroup:
+    """A subset of a batch's rows that attend together over a common padded length.
+
+    Attributes:
+        rows: ``(G,)`` indices of the batch rows in this group.
+        read_slots: ``(G, L)`` slot address of token ``j`` of each row's sequence,
+            for ``j < L``, where ``L`` is the longest context in the group.
+            Entries beyond a sequence's length point at harmless garbage; the
+            causal mask in attention hides them.
+    """
+
+    rows: Tensor
+    read_slots: Tensor
 
 
 @dataclass
@@ -62,22 +78,24 @@ class KVBatch:
         write_mask: ``(B, S)`` bool, True for real (non-padding) new tokens.
         write_slots: ``(N,)`` slot address for each True entry of ``write_mask``,
             in row-major order.
-        read_slots: ``(B, L)`` slot address of token ``j`` of each sequence, for
-            ``j < L``. Entries beyond a sequence's length point at harmless
-            garbage; the causal mask in attention hides them.
+        groups: rows bucketed by context length. Attention is computed per group,
+            so a 20-token sequence is not padded out to the 450-token one that
+            happens to share its batch (see :meth:`KVCacheManager.build_batch`).
     """
 
     pool: KVPool
     write_mask: Tensor
     write_slots: Tensor
-    read_slots: Tensor
+    groups: list[AttentionGroup]
 
-    def write_and_read(self, layer: int, k: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
-        """Store new ``(B, S, H, D)`` keys/values, then gather the ``(B, L, H, D)`` history."""
-        k_cache, v_cache = self.pool.k[layer], self.pool.v[layer]
-        k_cache[self.write_slots] = k[self.write_mask]
-        v_cache[self.write_slots] = v[self.write_mask]
-        return k_cache[self.read_slots], v_cache[self.read_slots]
+    def write(self, layer: int, k: Tensor, v: Tensor) -> None:
+        """Store the new ``(B, S, H, D)`` keys/values at their slots."""
+        self.pool.k[layer][self.write_slots] = k[self.write_mask]
+        self.pool.v[layer][self.write_slots] = v[self.write_mask]
+
+    def read(self, layer: int, read_slots: Tensor) -> tuple[Tensor, Tensor]:
+        """Gather keys/values at ``read_slots`` ``(G, L)`` into dense ``(G, L, H, D)`` tensors."""
+        return self.pool.k[layer][read_slots], self.pool.v[layer][read_slots]
 
 
 @dataclass(frozen=True)
@@ -177,19 +195,36 @@ class KVCacheManager(ABC):
     def addresses(self, seq_ids: list[int], positions: Tensor) -> Tensor:
         """Map ``positions[b, j]`` of sequence ``seq_ids[b]`` to physical slot indices."""
 
-    def build_batch(self, seq_ids: list[int], positions: Tensor, valid: Tensor) -> KVBatch:
+    def build_batch(
+        self, seq_ids: list[int], positions: Tensor, valid: Tensor, group_size: int = 8
+    ) -> KVBatch:
         """Build the :class:`KVBatch` for one forward pass.
+
+        Attention has to gather each sequence's history into a dense tensor, and a
+        dense batch is padded to its longest member. In a busy decode batch,
+        lengths range from a few tokens to hundreds, so padding everyone to the
+        maximum can double the memory traffic. Instead, rows are sorted by context
+        length and attended in groups of ``group_size``, each padded only to its
+        own longest member. (Real engines use variable-length attention kernels
+        that need no padding at all; grouping gets most of the benefit in plain
+        PyTorch.)
 
         Args:
             seq_ids: the sequences in the batch, one per row.
             positions: ``(B, S)`` absolute positions of the new tokens.
             valid: ``(B, S)`` bool, False for padding.
+            group_size: rows per attention group.
         """
         write_slots = self.addresses(seq_ids, positions)[valid]
-        context_len = int(positions[valid].max()) + 1
-        all_positions = torch.arange(context_len).expand(len(seq_ids), -1)
-        read_slots = self.addresses(seq_ids, all_positions)
-        return KVBatch(self.pool, valid, write_slots, read_slots)
+        context_lens = (positions * valid).amax(dim=1) + 1
+        order = torch.argsort(context_lens, descending=True, stable=True)
+        groups = []
+        for rows in order.split(group_size):
+            length = int(context_lens[rows[0]])
+            group_ids = [seq_ids[i] for i in rows.tolist()]
+            all_positions = torch.arange(length).expand(len(group_ids), -1)
+            groups.append(AttentionGroup(rows, self.addresses(group_ids, all_positions)))
+        return KVBatch(self.pool, valid, write_slots, groups)
 
     # --- accounting -------------------------------------------------------------
 

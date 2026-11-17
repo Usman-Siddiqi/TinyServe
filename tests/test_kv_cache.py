@@ -22,7 +22,7 @@ M = SMALL_MODEL
 
 
 def pool(num_slots: int) -> KVPool:
-    return KVPool(num_slots, M.n_layers, M.n_heads, M.head_dim)
+    return KVPool(num_slots, M.n_layers, M.n_kv_heads, M.head_dim)
 
 
 # --- BlockAllocator ------------------------------------------------------------------

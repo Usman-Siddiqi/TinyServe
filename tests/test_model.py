@@ -11,7 +11,7 @@ ATOL = 1e-5
 
 
 def make_cache(cfg: ModelConfig, rows: int) -> ContiguousKVCache:
-    pool = KVPool(rows * cfg.max_seq_len, cfg.n_layers, cfg.n_heads, cfg.head_dim)
+    pool = KVPool(rows * cfg.max_seq_len, cfg.n_layers, cfg.n_kv_heads, cfg.head_dim)
     return ContiguousKVCache(pool, cfg.max_seq_len)
 
 
@@ -110,3 +110,31 @@ def test_tokenizer_roundtrip() -> None:
     assert tok.decode(ids) == text
     assert max(ids) < tok.vocab_size
     assert tok.encode("é", add_bos=False) == [tok.unk_id]
+
+
+@torch.inference_mode()
+def test_length_grouped_attention_matches_individual() -> None:
+    """More rows than one attention group: grouping by length must not change results."""
+    model = TinyGPT(CFG)
+    g = torch.Generator().manual_seed(7)
+    lengths = torch.randint(2, 40, (13,), generator=g).tolist()
+    seqs = [random_ids(n + 1, seed=100 + i)[0] for i, n in enumerate(lengths)]
+    cache = make_cache(CFG, rows=len(seqs))
+    for i, (seq, n) in enumerate(zip(seqs, lengths, strict=True)):
+        cache.allocate(i, n + 1)
+        pos = torch.arange(n)[None]
+        model(seq[None, :n], pos, cache.build_batch([i], pos, torch.ones_like(pos) > 0))
+
+    next_ids = torch.stack([seq[n] for seq, n in zip(seqs, lengths, strict=True)])[:, None]
+    pos = torch.tensor(lengths)[:, None]
+    kv = cache.build_batch(list(range(len(seqs))), pos, pos >= 0, group_size=4)
+    assert len(kv.groups) == 4
+    batched = model(next_ids, pos, kv)[:, 0]
+    for b, seq in enumerate(seqs):
+        torch.testing.assert_close(batched[b], model(seq[None])[0, -1], atol=ATOL, rtol=0)
+
+
+def test_kv_bytes_per_token_reflects_gqa() -> None:
+    cfg = ModelConfig()
+    # keys + values, 4 layers, 2 KV heads of 64 dims, float32
+    assert cfg.kv_bytes_per_token() == 2 * 4 * 2 * 64 * 4

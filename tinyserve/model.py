@@ -31,11 +31,16 @@ class ModelConfig:
 
     vocab_size: int = CharTokenizer().vocab_size
     n_layers: int = 4
-    n_heads: int = 4
-    d_model: int = 256
-    d_ff: int = 1024
+    n_heads: int = 8
+    n_kv_heads: int = 2  # grouped-query attention: 4 query heads share each KV head
+    d_model: int = 512
+    d_ff: int = 2048
     max_seq_len: int = 512
     seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.d_model % self.n_heads or self.n_heads % self.n_kv_heads:
+            raise ValueError("d_model must divide by n_heads, and n_heads by n_kv_heads")
 
     @property
     def head_dim(self) -> int:
@@ -45,18 +50,26 @@ class ModelConfig:
     def kv_bytes_per_token(self, dtype: torch.dtype = torch.float32) -> int:
         """Bytes of KV cache needed for one token across all layers (keys + values)."""
         elem = torch.empty((), dtype=dtype).element_size()
-        return 2 * self.n_layers * self.d_model * elem
+        return 2 * self.n_layers * self.n_kv_heads * self.head_dim * elem
 
 
 class Attention(nn.Module):
-    """Multi-head causal self-attention backed by an optional external KV cache."""
+    """Causal grouped-query self-attention backed by an optional external KV cache.
+
+    With grouped-query attention (GQA, used by Llama 2/3 and Mistral) several
+    query heads share one key/value head. It shrinks the KV cache by
+    ``n_heads / n_kv_heads``, which matters because reading the cache is the
+    dominant cost of decoding long sequences in big batches.
+    """
 
     def __init__(self, cfg: ModelConfig, layer_idx: int) -> None:
         super().__init__()
         self.layer_idx = layer_idx
         self.n_heads = cfg.n_heads
+        self.n_kv_heads = cfg.n_kv_heads
         self.head_dim = cfg.head_dim
-        self.qkv = nn.Linear(cfg.d_model, 3 * cfg.d_model)
+        kv_dim = cfg.n_kv_heads * cfg.head_dim
+        self.qkv = nn.Linear(cfg.d_model, cfg.d_model + 2 * kv_dim)
         self.out = nn.Linear(cfg.d_model, cfg.d_model)
 
     def forward(self, x: Tensor, positions: Tensor, kv: KVBatch | None) -> Tensor:
@@ -69,29 +82,48 @@ class Attention(nn.Module):
                 tokens in ``x`` are the whole sequence and attend only to each other.
         """
         b, s, _ = x.shape
-        q, k, v = self.qkv(x).view(b, s, 3, self.n_heads, self.head_dim).unbind(dim=2)
+        kv_dim = self.n_kv_heads * self.head_dim
+        q, k, v = self.qkv(x).split([self.n_heads * self.head_dim, kv_dim, kv_dim], dim=-1)
+        q = q.view(b, s, self.n_heads, self.head_dim)
+        k = k.view(b, s, self.n_kv_heads, self.head_dim)
+        v = v.view(b, s, self.n_kv_heads, self.head_dim)
 
         if kv is None:
-            keys, values = k, v
-            key_positions = positions  # (B, S)
+            out = self._attend(q, k, v, positions, positions)
         else:
-            # Write the new keys/values into the cache, then read the full history
-            # (old tokens + the ones we just wrote) back as a dense (B, L, H, D) tensor.
-            keys, values = kv.write_and_read(self.layer_idx, k, v)
-            key_positions = torch.arange(keys.shape[1], device=x.device).expand(b, -1)
+            # Write the new keys/values into the cache, then read each sequence's
+            # full history (old tokens + the ones just written) back and attend.
+            kv.write(self.layer_idx, k, v)
+            out = torch.empty_like(q)
+            for group in kv.groups:
+                keys, values = kv.read(self.layer_idx, group.read_slots)
+                key_positions = torch.arange(keys.shape[1], device=x.device)
+                out[group.rows] = self._attend(
+                    q[group.rows], keys, values, positions[group.rows], key_positions
+                )
+        return self.out(out.reshape(b, s, -1))
 
-        # Causal mask from absolute positions: a query at position p may see keys at
-        # positions <= p. This one rule also hides padding and stale cache entries,
-        # because those always sit at positions beyond the sequence's current length.
-        mask = key_positions[:, None, :] <= positions[:, :, None]  # (B, S, L)
+    @staticmethod
+    def _attend(
+        q: Tensor, keys: Tensor, values: Tensor, q_positions: Tensor, key_positions: Tensor
+    ) -> Tensor:
+        """Causal attention of ``(B, S, H, D)`` queries over ``(B, L, H, D)`` keys/values.
 
+        The mask comes from absolute positions: a query at position ``p`` may see
+        keys at positions ``<= p``. This one rule also hides padding and stale
+        cache entries, because those always sit beyond the sequence's current length.
+        """
+        if key_positions.dim() == 1:
+            key_positions = key_positions.expand(q.shape[0], -1)
+        mask = key_positions[:, None, :] <= q_positions[:, :, None]  # (B, S, L)
         out = F.scaled_dot_product_attention(
             q.transpose(1, 2),  # (B, H, S, D)
             keys.transpose(1, 2),  # (B, H, L, D)
             values.transpose(1, 2),
             attn_mask=mask[:, None, :, :],
+            enable_gqa=True,
         )
-        return self.out(out.transpose(1, 2).reshape(b, s, -1))
+        return out.transpose(1, 2)  # (B, S, H, D)
 
 
 class Block(nn.Module):

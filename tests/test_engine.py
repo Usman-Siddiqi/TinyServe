@@ -17,7 +17,7 @@ GREEDY = SamplingParams(max_new_tokens=12, ignore_eos=True)
 
 def contiguous_kv(rows: int) -> ContiguousKVCache:
     m = SMALL_MODEL
-    pool = KVPool(rows * m.max_seq_len, m.n_layers, m.n_heads, m.head_dim)
+    pool = KVPool(rows * m.max_seq_len, m.n_layers, m.n_kv_heads, m.head_dim)
     return ContiguousKVCache(pool, m.max_seq_len)
 
 
