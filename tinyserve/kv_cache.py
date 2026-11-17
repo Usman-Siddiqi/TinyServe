@@ -16,13 +16,15 @@ The only thing that differs between memory layouts is that address function:
 
 * :class:`ContiguousKVCache` gives each sequence one slab of ``max_seq_len``
   slots up front, so ``address = row * max_seq_len + j``.
-* :class:`~tinyserve.kv_cache.PagedKVCache` (added below) hands out small
-  fixed-size blocks on demand, so ``address = block_table[j // B] * B + j % B``.
+* :class:`PagedKVCache` hands out small fixed-size blocks on demand, like the
+  pages of virtual memory (and vLLM's PagedAttention), so
+  ``address = block_table[j // B] * B + j % B``.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import torch
@@ -247,3 +249,117 @@ class ContiguousKVCache(KVCacheManager):
     def reserved_tokens(self) -> int:
         """Each live sequence pins a full slab."""
         return len(self._row_of) * self.max_seq_len
+
+
+class OutOfBlocksError(RuntimeError):
+    """Raised when the block allocator has no free blocks left."""
+
+
+class BlockAllocator:
+    """Hands out fixed-size physical blocks from a free list.
+
+    This is the whole "memory allocator" of a paged KV cache: since every block
+    has the same size, there is no external fragmentation and no compaction.
+    Any free block is as good as any other.
+    """
+
+    def __init__(self, num_blocks: int) -> None:
+        if num_blocks < 1:
+            raise ValueError("need at least one block")
+        self.num_blocks = num_blocks
+        # A stack: the most recently freed block is reused first (it is warm in cache).
+        self._free: list[int] = list(range(num_blocks - 1, -1, -1))
+        self._is_free = [True] * num_blocks
+
+    @property
+    def num_free(self) -> int:
+        """Blocks currently available."""
+        return len(self._free)
+
+    @property
+    def num_used(self) -> int:
+        """Blocks currently handed out."""
+        return self.num_blocks - len(self._free)
+
+    def allocate(self) -> int:
+        """Take one block off the free list."""
+        if not self._free:
+            raise OutOfBlocksError("no free KV blocks")
+        block = self._free.pop()
+        self._is_free[block] = False
+        return block
+
+    def free(self, block: int) -> None:
+        """Return a block to the free list."""
+        if self._is_free[block]:
+            raise ValueError(f"block {block} is already free (double free)")
+        self._is_free[block] = True
+        self._free.append(block)
+
+    def free_blocks(self) -> Iterator[int]:
+        """Iterate over the currently free block ids."""
+        return iter(self._free)
+
+
+class PagedKVCache(KVCacheManager):
+    """A paged KV cache: sequences own lists of small blocks, allocated on demand.
+
+    Each sequence has a *block table*: logical block ``i`` (tokens
+    ``i*B .. i*B+B-1``) lives in physical block ``block_table[i]``. Physical
+    blocks of one sequence can be anywhere in the pool. A sequence only ever
+    wastes the unused tail of its last block, so nearly all reserved memory holds
+    real data, and many more sequences fit in the same pool.
+
+    Args:
+        pool: the physical storage; its slots are split into blocks of ``block_size``.
+        block_size: tokens per block.
+        watermark: fraction of blocks kept free when admitting *new* sequences, so
+            running sequences have room to grow before anyone must be preempted.
+    """
+
+    def __init__(self, pool: KVPool, block_size: int = 16, watermark: float = 0.01) -> None:
+        super().__init__(pool)
+        self.block_size = block_size
+        self.allocator = BlockAllocator(pool.num_slots // block_size)
+        self.watermark_blocks = int(watermark * self.allocator.num_blocks)
+        self.block_tables: dict[int, list[int]] = {}
+
+    def blocks_needed(self, num_tokens: int) -> int:
+        """Number of blocks that hold ``num_tokens`` tokens."""
+        return -(-num_tokens // self.block_size)  # ceil division
+
+    def can_allocate(self, num_tokens: int) -> bool:
+        """A new sequence fits if its blocks are free without dipping into the watermark."""
+        needed = self.blocks_needed(num_tokens)
+        return needed <= self.allocator.num_free - self.watermark_blocks
+
+    def _allocate(self, seq_id: int, num_tokens: int) -> bool:
+        needed = self.blocks_needed(num_tokens)
+        self.block_tables[seq_id] = [self.allocator.allocate() for _ in range(needed)]
+        return True
+
+    def _grow(self, seq_id: int, num_tokens: int) -> bool:
+        table = self.block_tables[seq_id]
+        extra = self.blocks_needed(num_tokens) - len(table)
+        if extra > self.allocator.num_free:
+            return False
+        table.extend(self.allocator.allocate() for _ in range(extra))
+        return True
+
+    def _free(self, seq_id: int) -> None:
+        for block in self.block_tables.pop(seq_id):
+            self.allocator.free(block)
+
+    def addresses(self, seq_ids: list[int], positions: Tensor) -> Tensor:
+        """``block_table[pos // block_size] * block_size + pos % block_size``."""
+        tables = [self.block_tables[s] for s in seq_ids]
+        width = max(len(t) for t in tables)
+        padded = torch.zeros(len(tables), width, dtype=torch.long)
+        for i, t in enumerate(tables):
+            padded[i, : len(t)] = torch.tensor(t)
+        logical_block = (positions // self.block_size).clamp(max=width - 1)
+        return padded.gather(1, logical_block) * self.block_size + positions % self.block_size
+
+    def reserved_tokens(self) -> int:
+        """Every allocated block counts in full."""
+        return self.allocator.num_used * self.block_size

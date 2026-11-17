@@ -18,7 +18,13 @@ from dataclasses import dataclass, field
 
 import torch
 
-from tinyserve.kv_cache import ContiguousKVCache, KVCacheManager, KVPool, KVUsage
+from tinyserve.kv_cache import (
+    ContiguousKVCache,
+    KVCacheManager,
+    KVPool,
+    KVUsage,
+    PagedKVCache,
+)
 from tinyserve.model import ModelConfig, TinyGPT
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
@@ -30,6 +36,7 @@ from tinyserve.scheduler import (
 )
 
 STRATEGIES = ("naive", "static", "continuous")
+KV_LAYOUTS = ("contiguous", "paged")
 
 
 @dataclass(frozen=True)
@@ -178,6 +185,10 @@ class EngineConfig:
             gets the same pool so comparisons are apples to apples.
         max_batch_size: most requests running at once (ignored by ``naive``).
         max_tokens_per_step: per-step token budget of the continuous scheduler.
+        kv_layout: ``"contiguous"`` (one max_seq_len slab per request) or
+            ``"paged"`` (fixed-size blocks on demand). Paged needs preemption to
+            handle running out of memory, so only ``continuous`` supports it.
+        block_size: tokens per block for the paged layout.
         num_threads: PyTorch intra-op threads (None leaves the default).
     """
 
@@ -186,6 +197,8 @@ class EngineConfig:
     kv_capacity_tokens: int = 8192
     max_batch_size: int = 32
     max_tokens_per_step: int = 2048
+    kv_layout: str = "contiguous"
+    block_size: int = 16
     num_threads: int | None = None
 
 
@@ -193,12 +206,22 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     """Construct the model, KV cache, scheduler and engine described by ``cfg``."""
     if cfg.strategy not in STRATEGIES:
         raise ValueError(f"unknown strategy {cfg.strategy!r}; choose from {STRATEGIES}")
+    if cfg.kv_layout not in KV_LAYOUTS:
+        raise ValueError(f"unknown kv_layout {cfg.kv_layout!r}; choose from {KV_LAYOUTS}")
+    if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
+        raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
+    if cfg.kv_capacity_tokens < cfg.model.max_seq_len:
+        raise ValueError("kv_capacity_tokens must hold at least one max_seq_len sequence")
     if cfg.num_threads is not None:
         torch.set_num_threads(cfg.num_threads)
     m = cfg.model
     model = TinyGPT(m)
     pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_heads, m.head_dim)
-    kv = ContiguousKVCache(pool, m.max_seq_len)
+    kv: KVCacheManager
+    if cfg.kv_layout == "paged":
+        kv = PagedKVCache(pool, cfg.block_size)
+    else:
+        kv = ContiguousKVCache(pool, m.max_seq_len)
     scheduler: Scheduler
     if cfg.strategy == "naive":
         scheduler = NaiveScheduler(kv)
