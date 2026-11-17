@@ -119,6 +119,8 @@ class KVCacheManager(ABC):
     the :class:`KVBatch` the model consumes.
     """
 
+    layout = "base"
+
     def __init__(self, pool: KVPool) -> None:
         self.pool = pool
         self._lengths: dict[int, int] = {}
@@ -213,6 +215,8 @@ class ContiguousKVCache(KVCacheManager):
     tokens still pins 512 slots for its whole lifetime, which caps how many
     requests can share the pool.
     """
+
+    layout = "contiguous"
 
     def __init__(self, pool: KVPool, max_seq_len: int) -> None:
         super().__init__(pool)
@@ -316,6 +320,8 @@ class PagedKVCache(KVCacheManager):
         watermark: fraction of blocks kept free when admitting *new* sequences, so
             running sequences have room to grow before anyone must be preempted.
     """
+
+    layout = "paged"
 
     def __init__(self, pool: KVPool, block_size: int = 16, watermark: float = 0.01) -> None:
         super().__init__(pool)

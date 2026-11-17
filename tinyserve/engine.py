@@ -98,14 +98,22 @@ class Engine:
         """The KV cache manager shared by the scheduler and the runner."""
         return self.scheduler.kv
 
-    def add_request(self, request: Request) -> None:
-        """Queue a request. Its ``arrival_time`` defaults to now."""
+    def validate(self, request: Request) -> None:
+        """Raise ``ValueError`` if the engine could never serve ``request``.
+
+        Pure check with no side effects, so it is safe to call from another thread.
+        """
         if request.max_length > self.model.cfg.max_seq_len:
             raise ValueError(
                 f"prompt ({len(request.prompt_ids)}) + max_new_tokens "
                 f"({request.params.max_new_tokens}) exceeds max_seq_len "
                 f"({self.model.cfg.max_seq_len})"
             )
+        self.scheduler.validate(request)
+
+    def add_request(self, request: Request) -> None:
+        """Queue a request. Its ``arrival_time`` defaults to now."""
+        self.validate(request)
         if request.arrival_time is None:
             request.arrival_time = self.clock()
         self.scheduler.add(request)

@@ -71,8 +71,12 @@ class Scheduler(ABC):
         self._free_slots = list(range(max_batch_size - 1, -1, -1))
         self.num_preemptions = 0
 
+    def validate(self, request: Request) -> None:  # noqa: B027 - optional hook
+        """Raise ``ValueError`` if this scheduler could never run ``request``."""
+
     def add(self, request: Request) -> None:
         """Queue a new request."""
+        self.validate(request)
         request.status = RequestStatus.WAITING
         self.waiting.append(request)
 
@@ -209,11 +213,10 @@ class ContinuousScheduler(Scheduler):
         super().__init__(kv, max_batch_size)
         self.max_tokens_per_step = max_tokens_per_step
 
-    def add(self, request: Request) -> None:
-        """Queue a request, rejecting any that could never fit in one step's budget."""
+    def validate(self, request: Request) -> None:
+        """Reject requests that could never fit in one step's token budget."""
         if request.max_length > self.max_tokens_per_step:
             raise ValueError("request is longer than max_tokens_per_step")
-        super().add(request)
 
     def schedule(self) -> SchedulerOutput:
         """Plan the decode batch, preempting if needed, then fill free seats."""
