@@ -5,6 +5,9 @@ All schedulers share the same bookkeeping (a FIFO ``waiting`` queue and a
 
 * :class:`NaiveScheduler` serves one request at a time, start to finish. Think
   of a **taxi**: one passenger, door to door, everybody else waits at the curb.
+* :class:`StaticScheduler` fills a batch, then runs it until *every* request in
+  it has finished. A **bus that waits for everyone**: nobody new can board until
+  the last passenger gets off, so seats sit empty while the long trips finish.
 """
 
 from __future__ import annotations
@@ -144,3 +147,30 @@ class NaiveScheduler(Scheduler):
         for req in self.running:
             self._grow_or_fail(req)
         return SchedulerOutput(decode=list(self.running))
+
+
+class StaticScheduler(Scheduler):
+    """Classic static batching. Baseline #2 (the bus that waits for everyone).
+
+    When the batch is empty, admit up to ``max_batch_size`` waiting requests (as
+    many as fit in KV memory) and prefill them together. Then decode the batch
+    until all of them are done. Requests that finish early leave a dead seat
+    behind; it is only refilled once the whole batch has drained.
+
+    To be generous to this baseline, finished requests are dropped from the
+    compute instead of being decoded as padding (which is what a plain
+    ``model.generate`` on a padded batch would do). The seat stays empty either way.
+    """
+
+    name = "static"
+
+    def schedule(self) -> SchedulerOutput:
+        """Decode the current batch, or board a new one if the bus is empty."""
+        if self.running:
+            for req in self.running:
+                self._grow_or_fail(req)
+            return SchedulerOutput(decode=list(self.running))
+        while self.waiting and len(self.running) < self.max_batch_size:
+            if not self._admit(self.waiting[0]):
+                break
+        return SchedulerOutput(prefill=list(self.running))

@@ -10,7 +10,7 @@ from tinyserve.engine import Engine
 from tinyserve.kv_cache import ContiguousKVCache, KVPool
 from tinyserve.model import TinyGPT
 from tinyserve.request import FinishReason, Request, SamplingParams
-from tinyserve.scheduler import NaiveScheduler
+from tinyserve.scheduler import NaiveScheduler, StaticScheduler
 
 GREEDY = SamplingParams(max_new_tokens=12, ignore_eos=True)
 
@@ -83,3 +83,40 @@ def test_abort_frees_memory(model: TinyGPT) -> None:
     assert kv.num_sequences == 0
     assert req.finish_reason is FinishReason.ABORTED
     assert not engine.has_unfinished()
+
+
+def test_static_matches_reference(model: TinyGPT) -> None:
+    prompts = make_prompts(7, seed=1)
+    engine = Engine(model, StaticScheduler(contiguous_kv(4), max_batch_size=4))
+    done = engine.generate(prompts, GREEDY)
+    for req, prompt in zip(done, prompts, strict=True):
+        assert req.output_ids == reference_generate(model, prompt, GREEDY)
+
+
+def test_static_waits_for_whole_batch(model: TinyGPT) -> None:
+    """A short request finishing early must not let a waiting request board."""
+    engine = Engine(model, StaticScheduler(contiguous_kv(2), max_batch_size=2), record_trace=True)
+    lengths = [2, 10, 3]
+    reqs = [
+        Request(p, SamplingParams(max_new_tokens=n, ignore_eos=True))
+        for p, n in zip(make_prompts(3), lengths, strict=True)
+    ]
+    for r in reqs:
+        engine.add_request(r)
+    while engine.has_unfinished():
+        engine.step()
+    third_prefill = next(
+        i
+        for i, t in enumerate(engine.trace)
+        if any(rid == reqs[2].request_id for rid, _ in t.slots.values())
+    )
+    # The third request boards only after the 10-token request is done.
+    assert third_prefill == lengths[1]
+    assert max(t.num_running for t in engine.trace) == 2
+
+
+def test_static_respects_kv_capacity(model: TinyGPT) -> None:
+    """With room for only 2 slabs, a batch of 4 is capped at 2 by memory."""
+    engine = Engine(model, StaticScheduler(contiguous_kv(2), max_batch_size=4), record_trace=True)
+    engine.generate(make_prompts(5), GREEDY)
+    assert max(t.num_prefill + t.num_decode for t in engine.trace) == 2

@@ -22,9 +22,9 @@ from tinyserve.kv_cache import ContiguousKVCache, KVCacheManager, KVPool, KVUsag
 from tinyserve.model import ModelConfig, TinyGPT
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
-from tinyserve.scheduler import NaiveScheduler, Scheduler
+from tinyserve.scheduler import NaiveScheduler, Scheduler, StaticScheduler
 
-STRATEGIES = ("naive",)
+STRATEGIES = ("naive", "static")
 
 
 @dataclass(frozen=True)
@@ -192,5 +192,9 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     model = TinyGPT(m)
     pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_heads, m.head_dim)
     kv = ContiguousKVCache(pool, m.max_seq_len)
-    scheduler = NaiveScheduler(kv)
+    scheduler: Scheduler
+    if cfg.strategy == "naive":
+        scheduler = NaiveScheduler(kv)
+    else:
+        scheduler = StaticScheduler(kv, cfg.max_batch_size)
     return Engine(model, scheduler, record_trace=record_trace)
