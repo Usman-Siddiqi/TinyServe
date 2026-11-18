@@ -168,6 +168,14 @@ class AsyncEngine:
             "num_generated_tokens": self.engine.num_generated_tokens,
             "num_finished_requests": self._num_finished,
             "num_preemptions": sched.num_preemptions,
+            "prefix_caching": self.engine.kv.prefix_caching,
         }
+        prefix = self.engine.kv.prefix_cache_stats()
+        if prefix is not None:
+            snap["kv_cached_tokens"] = kv.cached_tokens
+            snap["prefix_cache_query_tokens"] = prefix.query_tokens
+            snap["prefix_cache_hit_tokens"] = prefix.hit_tokens
+            snap["prefix_cache_hit_rate"] = round(prefix.hit_rate, 4)
+            snap["prefix_cache_evicted_blocks"] = prefix.evicted_blocks
         with self._lock:
             self._snapshot = snap

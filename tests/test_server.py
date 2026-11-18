@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import replace
 
 import pytest
 from conftest import SMALL_MODEL, reference_generate
@@ -91,3 +92,19 @@ def test_stats_reports_engine_state(client: TestClient) -> None:
 
 def test_health(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_stats_report_prefix_cache_hits() -> None:
+    config = replace(CONFIG, enable_prefix_caching=True)
+    body = {"prompt": "You are a helpful assistant. " * 2, "max_tokens": 2, "stream": False}
+    with TestClient(create_app(config)) as c:
+        first = c.post("/generate", json=body).json()
+        second = c.post("/generate", json=body).json()
+        stats = c.get("/stats").json()
+    assert first["num_cached_tokens"] == 0
+    assert second["num_cached_tokens"] == 48  # 3 full blocks of the 59-token prompt
+    assert second["text"] == first["text"]
+    assert stats["prefix_caching"] is True
+    assert stats["prefix_cache_hit_tokens"] == 48
+    assert stats["prefix_cache_hit_rate"] == round(48 / 118, 4)
+    assert stats["kv_used_tokens"] == 0 and stats["kv_cached_tokens"] > 0
