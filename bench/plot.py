@@ -84,32 +84,33 @@ def plot_throughput(data: dict[str, Any], out: Path) -> None:
     tput = [res[n]["summary"]["throughput_tok_s"] for n in names]
     base = res["naive"]["summary"]["throughput_tok_s"] if "naive" in res else None
 
-    fig, ax = plt.subplots(figsize=(8, 4.2))
-    bars = ax.bar(
+    fig, ax = plt.subplots(figsize=(8, 0.6 * len(names) + 1.2))
+    bars = ax.barh(
         [LABELS[n] for n in names],
         tput,
         color=[COLORS[n] for n in names],
-        width=0.6,
+        height=0.62,
         edgecolor=SURFACE,
         linewidth=2,
     )
+    ax.invert_yaxis()
     for bar, value in zip(bars, tput, strict=True):
         label = f"{value:,.0f}"
         if base:
-            label += f"\n{value / base:.1f}x"
+            label += f"  ({value / base:.1f}x)"
         ax.annotate(
             label,
-            (bar.get_x() + bar.get_width() / 2, bar.get_height()),
-            xytext=(0, 4),
+            (bar.get_width(), bar.get_y() + bar.get_height() / 2),
+            xytext=(6, 0),
             textcoords="offset points",
-            ha="center",
-            va="bottom",
+            ha="left",
+            va="center",
             fontsize=10,
             color=INK,
         )
-    ax.set_ylabel("generated tokens / second")
-    ax.set_ylim(0, max(tput) * 1.25)
-    ax.grid(axis="x", visible=False)
+    ax.set_xlabel("generated tokens / second")
+    ax.set_xlim(0, max(tput) * 1.22)
+    ax.grid(axis="y", visible=False)
     ax.set_title("Throughput: same model, same memory, same 200 requests")
     w = data["workload"]
     subtitle(
