@@ -123,14 +123,16 @@ class AsyncEngine:
             if not self.engine.has_unfinished():
                 continue
             outputs = self.engine.step()
+            with self._lock:
+                self._token_log.append((time.monotonic(), len(outputs)))
+            self._num_finished += sum(o.finished for o in outputs)
+            # Refresh stats before streaming, so a client that just got its last
+            # token never sees a snapshot from before its request finished.
+            self._update_snapshot()
             for out in outputs:
                 stream = self._streams.get(out.request.request_id)
                 if stream is not None:
                     stream.loop.call_soon_threadsafe(stream.queue.put_nowait, out)
-            with self._lock:
-                self._token_log.append((time.monotonic(), len(outputs)))
-            self._num_finished += sum(o.finished for o in outputs)
-            self._update_snapshot()
 
     def _drain_inbox(self, block: bool) -> None:
         try:
