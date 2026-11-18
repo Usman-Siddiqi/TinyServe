@@ -28,6 +28,7 @@ from tinyserve.kv_cache import (
 )
 from tinyserve.kv_quant import KV_DTYPES, calibrate_key_smoothing
 from tinyserve.model import ModelConfig, TinyGPT
+from tinyserve.policy import POLICIES, make_policy
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
 from tinyserve.scheduler import (
@@ -131,7 +132,7 @@ class Engine:
     def step(self) -> list[StepOutput]:
         """Run one iteration and return the tokens it produced."""
         start = self.clock()
-        plan = self.scheduler.schedule()
+        plan = self.scheduler.schedule(start)
         if plan.is_empty:
             return []
 
@@ -212,6 +213,10 @@ class EngineConfig:
         block_size: tokens per block for the paged layout.
         enable_prefix_caching: share the KV of common prompt prefixes between
             requests (paged layout only).
+        queue_policy: admission order of the continuous scheduler, one of
+            :data:`~tinyserve.policy.POLICIES`.
+        ttft_slo_s: TTFT target used by the deadline-aware policies.
+        sjf_aging: tokens of priority a waiting request gains per second (``sjf``).
         num_threads: PyTorch intra-op threads (None leaves the default).
         kv_dtype: KV storage format, one of :data:`~tinyserve.kv_quant.KV_DTYPES`.
         kv_memory_bytes: if set, size the pool by bytes instead of
@@ -228,6 +233,9 @@ class EngineConfig:
     kv_layout: str = "contiguous"
     block_size: int = 16
     enable_prefix_caching: bool = False
+    queue_policy: str = "fcfs"
+    ttft_slo_s: float = 1.0
+    sjf_aging: float = 100.0
     num_threads: int | None = None
     kv_dtype: str = "float32"
     kv_memory_bytes: int | None = None
@@ -259,6 +267,10 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError(f"unknown strategy {cfg.strategy!r}; choose from {STRATEGIES}")
     if cfg.kv_layout not in KV_LAYOUTS:
         raise ValueError(f"unknown kv_layout {cfg.kv_layout!r}; choose from {KV_LAYOUTS}")
+    if cfg.queue_policy not in POLICIES:
+        raise ValueError(f"unknown queue_policy {cfg.queue_policy!r}; choose from {POLICIES}")
+    if cfg.queue_policy != "fcfs" and cfg.strategy != "continuous":
+        raise ValueError("queue policies other than 'fcfs' need the 'continuous' strategy")
     if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
     if cfg.kv_dtype not in KV_DTYPES:
@@ -287,7 +299,12 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     elif cfg.strategy == "static":
         scheduler = StaticScheduler(kv, cfg.max_batch_size)
     else:
+        policy = make_policy(cfg.queue_policy, cfg.ttft_slo_s, cfg.sjf_aging)
         scheduler = ContinuousScheduler(
-            kv, cfg.max_batch_size, cfg.max_tokens_per_step, cfg.chunked_prefill
+            kv,
+            cfg.max_batch_size,
+            cfg.max_tokens_per_step,
+            chunked_prefill=cfg.chunked_prefill,
+            policy=policy,
         )
     return Engine(model, scheduler, record_trace=record_trace)

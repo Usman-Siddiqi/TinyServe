@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from tinyserve.async_engine import AsyncEngine
 from tinyserve.engine import KV_LAYOUTS, STRATEGIES, EngineConfig, StepOutput, build_engine
 from tinyserve.kv_quant import KV_DTYPES
+from tinyserve.policy import POLICIES
 from tinyserve.request import SamplingParams
 from tinyserve.tokenizer import CharTokenizer
 
@@ -165,6 +166,8 @@ def main() -> None:
     parser.add_argument(
         "--chunked-prefill", action="store_true", help="split long prefills across steps"
     )
+    parser.add_argument("--queue-policy", choices=POLICIES, default="fcfs")
+    parser.add_argument("--ttft-slo", type=float, default=1.0, help="seconds, for edf policies")
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
@@ -181,6 +184,8 @@ def main() -> None:
         enable_prefix_caching=args.prefix_caching,
         max_tokens_per_step=args.max_tokens_per_step,
         chunked_prefill=args.chunked_prefill,
+        queue_policy=args.queue_policy if args.strategy == "continuous" else "fcfs",
+        ttft_slo_s=args.ttft_slo,
         num_threads=args.threads,
         kv_dtype=args.kv_dtype,
         kv_memory_bytes=None if args.kv_memory_mib is None else int(args.kv_memory_mib * 2**20),

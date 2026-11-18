@@ -218,6 +218,137 @@ def plot_batch_size(data: dict[str, Any], out: Path) -> None:
     plt.close(fig)
 
 
+POLICY_COLORS = {
+    "fcfs": "#2a78d6",
+    "sjf": "#1baf7a",
+    "edf": "#eda100",
+    "slo": "#eb6834",
+}
+POLICY_LABELS = {
+    "fcfs": "FCFS",
+    "sjf": "Shortest job first",
+    "edf": "Earliest deadline, late ones last",
+    "slo": "Shortest feasible job first",
+}
+
+
+def sweep_medians(sweep: dict[str, Any]) -> dict[str, dict[float, dict[str, float]]]:
+    """policy -> load -> metric -> median over the seeds and repeats of that point.
+
+    Adds ``goodput_norm``: goodput as a fraction of the calibrated capacity.
+    """
+    capacity = sweep["calibration"]["capacity_rps"]
+    grouped: dict[str, dict[float, list[dict[str, float]]]] = {}
+    for p in sweep["points"]:
+        s = {**p["summary"], "goodput_norm": p["summary"]["goodput_rps"] / capacity}
+        grouped.setdefault(p["policy"], {}).setdefault(p["load"], []).append(s)
+    return {
+        policy: {
+            load: {k: float(np.median([s[k] for s in reps])) for k in reps[0]}
+            for load, reps in sorted(by_load.items())
+        }
+        for policy, by_load in grouped.items()
+    }
+
+
+def plot_goodput(sweep: dict[str, Any], out: Path) -> None:
+    """Goodput, SLO attainment and their latency cost vs. offered load, one line per policy."""
+    med = sweep_medians(sweep)
+    cfg = sweep["config"]
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.4))
+    loads = sorted({p["load"] for p in sweep["points"]})
+    axes[0, 0].plot(loads, loads, color=INK_2, linewidth=1, linestyle=":", label="all on time")
+    panels = (
+        (axes[0, 0], "goodput_norm", "Goodput", "on-time requests / s (x capacity)"),
+        (axes[0, 1], "slo_attainment", "SLO attainment", "fraction of requests on time"),
+        (axes[1, 0], "latency_p99_s", "Price 1: p99 latency", "seconds"),
+        (axes[1, 1], "long10_latency_p50_s", "Price 2: longest 10% of jobs", "median latency (s)"),
+    )
+    for ax, key, title, ylabel in panels:
+        for policy in POLICY_COLORS:
+            if policy in med:
+                xs = list(med[policy])
+                ys = [med[policy][x][key] for x in xs]
+                ax.plot(
+                    xs, ys, marker="o", color=POLICY_COLORS[policy], label=POLICY_LABELS[policy]
+                )
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
+    for ax in axes[1]:
+        ax.set_xlabel("offered load (x capacity)")
+    axes[0, 0].set_ylim(0, 1.3)
+    axes[0, 1].set_ylim(0, 1.05)
+    axes[0, 1].axhline(0.9, color=INK_2, linewidth=0.8, linestyle=":")
+    axes[0, 0].legend(loc="upper right")
+    source = "Simulated" if sweep["points"][0]["mode"] == "sim" else "Measured"
+    subtitle(
+        fig,
+        f"SLO: TTFT <= {cfg['ttft_slo_s']:g} s and time per output token <= "
+        f"{cfg['tpot_slo_s'] * 1000:g} ms. {source}, {sweep['points'][0]['num_requests']} "
+        "requests per point, median over seeds. Continuous batching + paged KV.",
+    )
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+
+
+def plot_sim_check(measured: dict[str, Any], out: Path) -> None:
+    """Each real run vs. the simulator replaying it with that run's own fitted step costs."""
+    pts = [p for p in measured["points"] if "sim_summary" in p]
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.2))
+    panels = (
+        (axes[0], "slo_attainment", "SLO attainment"),
+        (axes[1], "ttft_p99_s", "p99 TTFT (s)"),
+        (axes[2], "latency_p99_s", "p99 latency (s)"),
+    )
+    for ax, key, title in panels:
+        real = [p["summary"][key] for p in pts]
+        sim = [p["sim_summary"][key] for p in pts]
+        hi = max(*real, *sim) * 1.08
+        ax.plot([0, hi], [0, hi], color=INK_2, linewidth=1, linestyle=":")
+        for policy in POLICY_COLORS:
+            xy = [(p["summary"][key], p["sim_summary"][key]) for p in pts if p["policy"] == policy]
+            if xy:
+                xs, ys = zip(*xy, strict=True)
+                ax.scatter(xs, ys, color=POLICY_COLORS[policy], label=POLICY_LABELS[policy])
+        ax.set_xlim(0, hi)
+        ax.set_ylim(0, hi)
+        ax.set_title(title)
+        ax.set_xlabel("measured")
+    axes[0].set_ylabel("simulated")
+    axes[0].legend(loc="upper left")
+    subtitle(
+        fig,
+        f"{len(pts)} real runs, each replayed in the simulator with a step cost model fitted "
+        "to that run's own trace. On the dotted line the simulator is exact.",
+    )
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+
+
+def sweep_table(sweep: dict[str, Any]) -> str:
+    """Markdown table of the sweep: one row per (load, policy)."""
+    med = sweep_medians(sweep)
+    rows = [
+        "| Load | Policy | Goodput (x capacity) | SLO met | p50 TTFT | p99 TTFT "
+        "| p50 latency | p99 latency | Longest 10%: p50 latency |",
+        "|---:|---|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for load in sorted({p["load"] for p in sweep["points"]}):
+        for policy in POLICY_COLORS:
+            s = med.get(policy, {}).get(load)
+            if s is None:
+                continue
+            rows.append(
+                f"| {load:g}x | {POLICY_LABELS[policy]} | {s['goodput_norm']:.2f} "
+                f"| {s['slo_attainment']:.0%} | {s['ttft_p50_s']:.2f} s | {s['ttft_p99_s']:.2f} s "
+                f"| {s['latency_p50_s']:.2f} s | {s['latency_p99_s']:.2f} s "
+                f"| {s['long10_latency_p50_s']:.2f} s |"
+            )
+    return "\n".join(rows) + "\n"
+
+
 def results_table(data: dict[str, Any]) -> str:
     """Markdown table of the headline numbers."""
     res = data["results"]
@@ -261,6 +392,8 @@ def main() -> None:
     """Render all charts and the results table."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--results", type=Path, default=Path("bench/results/results.json"))
+    parser.add_argument("--sweep", type=Path, default=Path("bench/results/sweep.json"))
+    parser.add_argument("--sweep-sim", type=Path, default=Path("bench/results/sweep_sim.json"))
     parser.add_argument("--out-dir", type=Path, default=Path("docs/assets"))
     args = parser.parse_args()
 
@@ -274,6 +407,17 @@ def main() -> None:
     table = results_table(data)
     (args.results.parent / "results.md").write_text(table)
     print(table)
+    real = json.loads(args.sweep.read_text()) if args.sweep.exists() else None
+    sim = json.loads(args.sweep_sim.read_text()) if args.sweep_sim.exists() else None
+    if sim or real:
+        plot_goodput(sim or real, args.out_dir / "goodput.png")
+    if real:
+        plot_sim_check(real, args.out_dir / "sim_check.png")
+    for path, sweep in ((args.sweep, real), (args.sweep_sim, sim)):
+        if sweep:
+            table = sweep_table(sweep)
+            path.with_suffix(".md").write_text(table)
+            print(table)
 
 
 if __name__ == "__main__":

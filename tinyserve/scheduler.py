@@ -1,6 +1,6 @@
 """Schedulers decide, at every engine step, which requests run and in which phase.
 
-All schedulers share the same bookkeeping (a FIFO ``waiting`` queue and a
+All schedulers share the same bookkeeping (a ``waiting`` queue and a
 ``running`` list) and differ only in their admission policy:
 
 * :class:`NaiveScheduler` serves one request at a time, start to finish. Think
@@ -10,7 +10,8 @@ All schedulers share the same bookkeeping (a FIFO ``waiting`` queue and a
   the last passenger gets off, so seats sit empty while the long trips finish.
 * :class:`ContinuousScheduler` re-plans the batch at *every* decode step:
   finished requests leave immediately and waiting ones take their seats. A
-  **shuttle** that drops people off and picks people up at every stop.
+  **shuttle** that drops people off and picks people up at every stop. Who
+  boards first is up to its :mod:`~tinyserve.policy` (FCFS by default).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from tinyserve.kv_cache import KVCacheManager
+from tinyserve.policy import FCFSPolicy, QueuePolicy
 from tinyserve.request import FinishReason, Request, RequestStatus
 
 
@@ -95,8 +97,8 @@ class Scheduler(ABC):
         return bool(self.waiting or self.running)
 
     @abstractmethod
-    def schedule(self) -> SchedulerOutput:
-        """Pick the work for the next engine step."""
+    def schedule(self, now: float) -> SchedulerOutput:
+        """Pick the work for the next engine step, at time ``now``."""
 
     def finish_step(self) -> list[Request]:
         """Release memory and seats of requests that finished this step. Returns them."""
@@ -125,7 +127,7 @@ class Scheduler(ABC):
     # --- helpers for subclasses ----------------------------------------------------
 
     def _admit(self, request: Request) -> bool:
-        """Move the head of the waiting queue into the batch, if its KV memory fits.
+        """Move a waiting request into the batch, if its KV memory fits.
 
         With prefix caching, the request's cached prefix is skipped by prefill.
         """
@@ -133,8 +135,7 @@ class Scheduler(ABC):
         num_cached = self.kv.match_prefix(token_ids)
         if not self.kv.allocate(request.request_id, request.length, token_ids):
             return False
-        assert self.waiting[0] is request, "requests are admitted in FIFO order"
-        self.waiting.popleft()
+        self.waiting.remove(request)
         request.num_computed_tokens = request.num_cached_tokens = num_cached
         request.status = RequestStatus.RUNNING
         self.running.append(request)
@@ -164,7 +165,7 @@ class NaiveScheduler(Scheduler):
     def __init__(self, kv: KVCacheManager) -> None:
         super().__init__(kv, max_batch_size=1)
 
-    def schedule(self) -> SchedulerOutput:
+    def schedule(self, now: float) -> SchedulerOutput:
         """Decode the current request, or start the next one if the taxi is empty."""
         if not self.running:
             if self.waiting and self._admit(self.waiting[0]):
@@ -190,7 +191,7 @@ class StaticScheduler(Scheduler):
 
     name = "static"
 
-    def schedule(self) -> SchedulerOutput:
+    def schedule(self, now: float) -> SchedulerOutput:
         """Decode the current batch, or board a new one if the bus is empty."""
         if self.running:
             for req in self.running:
@@ -209,12 +210,12 @@ class ContinuousScheduler(Scheduler):
 
     1. **Decode** every running request (one new token each). Before that, make
        sure each has KV room for the token it is about to write. If memory runs
-       out, *preempt* the most recently admitted request: free its KV and put it
-       back at the front of the queue. When it is readmitted its whole sequence is
-       prefilled again ("recompute" preemption; nothing it generated is lost).
+       out, *preempt* the lowest-ranked running request: free its KV and put it
+       back in the queue. When it is readmitted its whole sequence is prefilled
+       again ("recompute" preemption; nothing it generated is lost).
     2. **Prefill** with whatever is left of the step's token budget: first
        requests whose prefill is already under way, then newly admitted ones
-       (oldest first, while there is a free seat and their KV memory fits).
+       (best-ranked first, while there is a free seat and their KV memory fits).
 
     Without chunking, a prompt must fit in the leftover budget in one piece, so
     the step that prefills it takes as long as the whole prompt and every running
@@ -222,12 +223,16 @@ class ContinuousScheduler(Scheduler):
     is split across steps (Sarathi-Serve), which keeps every step roughly the
     same size and smooths out inter-token latency.
 
+    The ranking comes from ``policy``. The default, FCFS, admits oldest first
+    and preempts the most recently admitted request.
+
     Args:
         kv: the KV cache manager.
         max_batch_size: most requests running at once.
         max_tokens_per_step: token budget per step (prefill tokens + one per
             decode). Must be at least ``max_batch_size``.
         chunked_prefill: allow a prefill to be split across several steps.
+        policy: admission and preemption order (default :class:`FCFSPolicy`).
     """
 
     name = "continuous"
@@ -237,24 +242,28 @@ class ContinuousScheduler(Scheduler):
         kv: KVCacheManager,
         max_batch_size: int,
         max_tokens_per_step: int = 2048,
+        *,
         chunked_prefill: bool = False,
+        policy: QueuePolicy | None = None,
     ) -> None:
         super().__init__(kv, max_batch_size)
         if max_tokens_per_step < max_batch_size:
             raise ValueError("max_tokens_per_step must be >= max_batch_size")
         self.max_tokens_per_step = max_tokens_per_step
         self.chunked_prefill = chunked_prefill
+        self.policy = policy or FCFSPolicy()
 
     def validate(self, request: Request) -> None:
         """Without chunking, reject requests that could never fit in one step."""
         if not self.chunked_prefill and request.max_length > self.max_tokens_per_step:
             raise ValueError("request is longer than max_tokens_per_step")
 
-    def schedule(self) -> SchedulerOutput:
+    def schedule(self, now: float) -> SchedulerOutput:
         """Plan the decode batch (preempting if needed), then spend the rest on prefill."""
         out = SchedulerOutput()
 
-        # 1. Decode everyone that is past prefill, oldest first. Preempt from the back.
+        # 1. Decode everyone past prefill, best-ranked first. Preempt from the back.
+        self.running = self.policy.order(self.running, now)
         i = 0
         while i < len(self.running):
             req = self.running[i]
@@ -277,9 +286,12 @@ class ContinuousScheduler(Scheduler):
             if req.needs_prefill:
                 budget -= self._add_prefill(out, req, budget)
 
-        # 3. Admit new requests (FCFS) into free seats while budget and memory allow.
-        while self.waiting and len(self.running) < self.max_batch_size and budget > 0:
-            req = self.waiting[0]
+        # 3. Admit new requests in policy order while seats, budget and memory allow.
+        # Stopping at the first one that does not fit (rather than skipping it)
+        # keeps big requests from being overtaken forever.
+        for req in self.policy.order(self.waiting, now):
+            if len(self.running) >= self.max_batch_size or budget == 0:
+                break
             cost = req.length - self.kv.match_prefix(req.all_ids)  # cached tokens are free
             if not self.chunked_prefill and cost > budget:
                 break
