@@ -25,6 +25,7 @@ from tinyserve.kv_cache import (
     KVUsage,
     PagedKVCache,
 )
+from tinyserve.kv_quant import KV_DTYPES, calibrate_key_smoothing
 from tinyserve.model import ModelConfig, TinyGPT
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
@@ -207,6 +208,10 @@ class EngineConfig:
             handle running out of memory, so only ``continuous`` supports it.
         block_size: tokens per block for the paged layout.
         num_threads: PyTorch intra-op threads (None leaves the default).
+        kv_dtype: KV storage format, one of :data:`~tinyserve.kv_quant.KV_DTYPES`.
+        kv_memory_bytes: if set, size the pool by bytes instead of
+            ``kv_capacity_tokens``, so a smaller ``kv_dtype`` gets more slots.
+        kv_smooth_keys: for ``int8``, calibrate per-channel key smoothing at startup.
     """
 
     strategy: str = "naive"
@@ -217,6 +222,28 @@ class EngineConfig:
     kv_layout: str = "contiguous"
     block_size: int = 16
     num_threads: int | None = None
+    kv_dtype: str = "float32"
+    kv_memory_bytes: int | None = None
+    kv_smooth_keys: bool = True
+
+    @property
+    def num_kv_slots(self) -> int:
+        """Token slots in the pool: ``kv_capacity_tokens``, or as many as fit the byte budget."""
+        if self.kv_memory_bytes is None:
+            return self.kv_capacity_tokens
+        return self.kv_memory_bytes // self.model.kv_bytes_per_token(self.kv_dtype)
+
+
+def calibrate_kv(model: TinyGPT, pool: KVPool, num_seqs: int = 4) -> None:
+    """Set ``pool.key_smoothing`` from the key magnitudes on a few calibration sequences.
+
+    The model has random weights, so random tokens are as good as text; with a
+    real checkpoint these would be sample prompts.
+    """
+    m = model.cfg
+    g = torch.Generator().manual_seed(0)
+    ids = torch.randint(4, m.vocab_size, (num_seqs, m.max_seq_len), generator=g)
+    pool.key_smoothing = calibrate_key_smoothing(model, ids)
 
 
 def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
@@ -227,13 +254,17 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError(f"unknown kv_layout {cfg.kv_layout!r}; choose from {KV_LAYOUTS}")
     if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
-    if cfg.kv_capacity_tokens < cfg.model.max_seq_len:
-        raise ValueError("kv_capacity_tokens must hold at least one max_seq_len sequence")
+    if cfg.kv_dtype not in KV_DTYPES:
+        raise ValueError(f"unknown kv_dtype {cfg.kv_dtype!r}; choose from {KV_DTYPES}")
+    if cfg.num_kv_slots < cfg.model.max_seq_len:
+        raise ValueError("the KV pool must hold at least one max_seq_len sequence")
     if cfg.num_threads is not None:
         torch.set_num_threads(cfg.num_threads)
     m = cfg.model
     model = TinyGPT(m)
-    pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_kv_heads, m.head_dim)
+    pool = KVPool(cfg.num_kv_slots, m.n_layers, m.n_kv_heads, m.head_dim, cfg.kv_dtype)
+    if pool.format.quantized and cfg.kv_smooth_keys:
+        calibrate_kv(model, pool)
     kv: KVCacheManager
     if cfg.kv_layout == "paged":
         kv = PagedKVCache(pool, cfg.block_size)
