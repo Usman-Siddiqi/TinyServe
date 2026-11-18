@@ -75,6 +75,7 @@ class Engine:
         scheduler: decides who runs each step; owns the KV cache manager.
         clock: time source, in seconds. Injectable for tests.
         record_trace: keep a :class:`StepTrace` for every step in ``self.trace``.
+        attention: decode attention backend (see :class:`ModelRunner`).
     """
 
     def __init__(
@@ -83,10 +84,11 @@ class Engine:
         scheduler: Scheduler,
         clock: Callable[[], float] = time.perf_counter,
         record_trace: bool = False,
+        attention: str | None = None,
     ) -> None:
         self.model = model
         self.scheduler = scheduler
-        self.runner = ModelRunner(model, scheduler.kv)
+        self.runner = ModelRunner(model, scheduler.kv, attention)
         self.clock = clock
         self.record_trace = record_trace
         self.trace: list[StepTrace] = []
@@ -207,6 +209,8 @@ class EngineConfig:
             handle running out of memory, so only ``continuous`` supports it.
         block_size: tokens per block for the paged layout.
         num_threads: PyTorch intra-op threads (None leaves the default).
+        attention: decode attention backend, ``"torch"`` or ``"cpp"``. None reads
+            ``$TINYSERVE_ATTENTION`` and defaults to ``"torch"``.
     """
 
     strategy: str = "naive"
@@ -217,6 +221,7 @@ class EngineConfig:
     kv_layout: str = "contiguous"
     block_size: int = 16
     num_threads: int | None = None
+    attention: str | None = None
 
 
 def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
@@ -246,4 +251,4 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         scheduler = StaticScheduler(kv, cfg.max_batch_size)
     else:
         scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step)
-    return Engine(model, scheduler, record_trace=record_trace)
+    return Engine(model, scheduler, record_trace=record_trace, attention=cfg.attention)

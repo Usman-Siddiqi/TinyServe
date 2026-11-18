@@ -104,7 +104,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,bench]"
 
-pytest                      # 41 tests, a few seconds
+pytest                      # 64 tests; the first run also compiles the C++ kernel
 ```
 
 **Run the server** (continuous batching with a paged KV cache by default):
@@ -178,6 +178,8 @@ python docs/make_visuals.py  # renders the two GIFs from real engine traces
 ```text
 tinyserve/
   model.py         TinyGPT: decoder-only transformer whose attention reads an external KV cache
+  attention.py     decode attention backends: torch gather or the fused C++ kernel
+  csrc/            paged_attention.cpp, the fused decode kernel (JIT-compiled)
   tokenizer.py     printable-ASCII character tokenizer
   kv_cache.py      KV pool, contiguous and paged cache managers, block allocator
   request.py       requests, sampling params, per-request timing metrics
@@ -191,6 +193,7 @@ tinyserve/
   loadgen.py       async HTTP load generator
 bench/
   run.py           benchmark all strategies, save raw JSON
+  attention.py     torch vs. C++ decode attention, per step and end to end
   plot.py          charts + results table from that JSON
   results/         the raw results behind every number in this README
 docs/
@@ -232,7 +235,9 @@ The pool is plain storage, per layer a `(num_slots, n_kv_heads, head_dim)` tenso
 
 `BlockAllocator` is a free list of block ids. Because every block has the same size there is no external fragmentation and nothing to compact, and a freed block is immediately reusable by anyone. Each sequence keeps a block table mapping logical blocks to physical ones, which can be scattered anywhere in the pool. `KVUsage` reports used slots (holding a real token), reserved slots (handed out) and capacity, so utilization is `used / reserved`.
 
-Attention gathers each sequence's keys and values through those addresses into a dense tensor. Rows are sorted by length and attended in groups of 8 so a 20-token sequence is not padded out to a 450-token one in the same batch.
+By default, attention gathers each sequence's keys and values through those addresses into a dense tensor. Rows are sorted by length and attended in groups of 8 so a 20-token sequence is not padded out to a 450-token one in the same batch.
+
+The `cpp` attention backend skips that copy during decode. [`csrc/paged_attention.cpp`](tinyserve/csrc/paged_attention.cpp) is a small PagedAttention-style kernel: it walks each sequence's block table and reads K/V straight from the pool, with an online softmax, no padding, OpenMP threads over (sequence, KV head) pairs, and the 4 query heads of each GQA group sharing every K/V load. A contiguous cache is treated as a paged one with a single `max_seq_len` block. It is JIT-compiled with `torch.utils.cpp_extension` on first use; if no compiler is available TinyServe warns and falls back to `torch`. Select it with `EngineConfig(attention="cpp")`, `tinyserve-server --attention cpp` or `TINYSERVE_ATTENTION=cpp`. Prefill always uses the torch path.
 
 ### Server (`async_engine.py`, `server.py`)
 
@@ -246,7 +251,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 
 - **CPU only.** Everything runs on PyTorch's CPU kernels. Absolute numbers are tiny next to a GPU, and the shared cloud VM the benchmark ran on adds a few percent of run-to-run noise (all repeats are listed under the table).
 - **Random weights.** The output is noise. Under greedy decoding the model tends to repeat one character; use `temperature` for more varied noise.
-- **Simplified attention.** There is no fused paged-attention kernel: each step gathers a sequence's K/V from its blocks into a temporary dense tensor and calls PyTorch's `scaled_dot_product_attention`. That extra copy is the main cost of decoding long sequences in big batches, and it is why nearly doubling the batch with paging buys 1.3x more throughput here rather than 2x. Prefill batches are padded to their longest prompt.
+- **Simplified attention by default.** The default `torch` backend gathers each sequence's K/V from its blocks into a temporary dense tensor and calls PyTorch's `scaled_dot_product_attention`. That extra copy is the main cost of decoding long sequences in big batches, and it is why nearly doubling the batch with paging buys 1.3x more throughput here rather than 2x. The opt-in `cpp` backend removes it for decode only; it is float32 only and needs a C++ compiler with OpenMP. Prefill batches are padded to their longest prompt.
 - **A toy model and tokenizer.** 11M parameters, a character vocabulary, learned positions instead of RoPE, float32 throughout.
 - **No chunked prefill or prefill/decode disaggregation.** A long prompt is prefilled in one go (bounded by the per-step token budget).
 
@@ -254,7 +259,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 
 - [ ] **Prefix caching**: share KV blocks between requests with a common prompt prefix (block hashing plus reference counts in the allocator).
 - [ ] **Speculative decoding**: a smaller draft model proposes several tokens and the main model verifies them in one pass.
-- [ ] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor.
+- [x] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor (decode; `--attention cpp`).
 - [ ] **Preemption by swapping**: move a victim's blocks to a CPU-side pool instead of recomputing them.
 - [ ] Chunked prefill, so long prompts never stall decoding.
 - [ ] A bf16 KV cache to halve memory traffic.
