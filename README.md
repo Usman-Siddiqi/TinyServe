@@ -77,6 +77,38 @@ The static batcher's sawtooth is the bus problem in one picture: the batch fills
 
 With contiguous slabs, a request that ends up 120 tokens long still pins 512 slots for its whole life, so the 8,192-slot pool holds only 16 requests and most of what is reserved is empty. With 16-token pages a request only ever wastes the unused tail of its last block.
 
+### Scheduling for goodput
+
+Throughput is not what users feel. Production servers are judged on **goodput**: requests per second that meet a latency SLO, here a time to first token (TTFT) and a time per output token (TPOT) target. Once the shuttle is full, *who boards next* decides how many passengers arrive on time. The continuous scheduler takes a pluggable queue policy (`tinyserve/policy.py`):
+
+| Policy | Admits first | Preempts first |
+|---|---|---|
+| `fcfs` (default) | oldest | newest |
+| `sjf` | smallest prompt + `max_new_tokens`, with aging so big jobs cannot starve | largest |
+| `edf` | earliest TTFT deadline; requests already past it go last | latest deadline |
+| `slo` | *shortest feasible job*: smallest job among those that can still make their deadline; late ones last, oldest first | largest |
+
+<p align="center"><img src="docs/assets/goodput.png" alt="Goodput, SLO attainment and latency cost of each queue policy from half to three times capacity" width="900"></p>
+
+The chart is from the scheduler simulator (below): 1,000 requests per point, median of 5 seeds, SLO of TTFT <= 3 s and TPOT <= 150 ms. The sweep ran with 1 PyTorch thread on a shared, busy VM, where the engine served 445 tok/s (about 5x slower than the main benchmark), so the SLO is scaled up to match. Load is a multiple of the capacity measured by serving a burst of requests.
+
+- **Below capacity the policy does not matter.** The queue is empty, so every policy makes the same choices.
+- **Past capacity FCFS collapses.** Every request queues behind older ones that are already late, so at 1.5x load only 13% meet the SLO.
+- **Demoting late requests is most of the fix.** `edf` keeps 66% on time at 1.5x. Adding shortest-first among the on-time ones (`slo`) keeps 88%: **goodput 6.9x FCFS at 1.5x load and 10x at 2x**.
+- **SJF alone barely helps** (+10% at 1.5x). Short jobs finish sooner, but everyone is still late.
+- **The price is the tail.** Demoted requests wait until the burst passes: p99 latency goes from 55 s to 126 s at 1.5x, and with `slo` the longest 10% of jobs wait about twice as long (median 37 s to 68 s). `edf` is the fairer option: at 1.5x its long jobs even finish sooner than under FCFS (22 s). A production server would pair either one with load shedding, so a request that is already late gets a fast "busy" answer instead of a long wait.
+- **The size hint is an oracle here.** Benchmarks ignore EOS, so `max_new_tokens` is the exact output length. Real servers only know an upper bound or a predicted length.
+
+**Real engine, heavy overload** (4x load, 200 requests, 3 interleaved repeats): `slo` beat FCFS in every repeat, median goodput **2.0x** (3.51 vs. 1.72 req/s) and 58% vs. 26% of requests on time. The median request finished in 6.9 s instead of 12.9 s, while p99 latency rose from 21.3 s to 25.7 s and the longest 10% of jobs from 18.0 s to 22.3 s. The raw runs are in [`bench/results/sweep.json`](bench/results/sweep.json).
+
+#### A simulator for scheduling experiments
+
+On a shared VM, the engine's speed drifted by up to about 30% between runs, and near capacity that alone swung FCFS from 78% to 100% of requests on time in two repeats of the same workload. Scheduling decisions do not depend on token values, so `tinyserve/simulator.py` replays a workload through the *real* scheduler and KV cache manager on a virtual clock, charging each step a duration from a linear cost model (fixed overhead, prefill tokens, decode context tokens) fitted to a real engine trace. A 1,000-request run takes under a second and is deterministic.
+
+To check it, every real sweep run is replayed with a cost model fitted to its own trace. Across 22 runs the simulator's goodput is within 1.4% of the measured one (median; worst 31%), and p99 latency within 2.0% (worst 40%). The misses are single runs; one linear model per run cannot follow a machine whose speed drifts within the run.
+
+<p align="center"><img src="docs/assets/sim_check.png" alt="Simulated vs. measured SLO attainment, p99 TTFT and p99 latency for 22 real runs" width="900"></p>
+
 ## Architecture
 
 ```mermaid
@@ -104,7 +136,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,bench]"
 
-pytest                      # 41 tests, a few seconds
+pytest                      # 60 tests, a few seconds
 ```
 
 **Run the server** (continuous batching with a paged KV cache by default):
@@ -171,6 +203,9 @@ tinyserve-loadgen --url http://127.0.0.1:8000 --num-requests 100 --rate 10
 python bench/run.py          # writes bench/results/results.json (raw, per request)
 python bench/plot.py         # renders docs/assets/*.png and bench/results/results.md
 python docs/make_visuals.py  # renders the two GIFs from real engine traces
+python bench/sweep.py --policies fcfs slo     # goodput load sweep (real engine)
+python bench/sweep.py --mode sim --calibration bench/results/sweep.json \
+    --out bench/results/sweep_sim.json --policies fcfs sjf edf slo --num-requests 1000 --seeds 0 1 2 3 4
 ```
 
 ## Project structure
@@ -184,6 +219,8 @@ tinyserve/
   sampler.py       greedy / temperature sampling with per-request RNGs
   runner.py        builds padded prefill and decode batches, runs the model
   scheduler.py     naive, static and continuous batching schedulers (+ preemption)
+  policy.py        queue policies: FCFS, SJF, EDF, shortest feasible job first
+  simulator.py     replays a workload through a scheduler on a virtual clock
   engine.py        the step loop, tracing, and build_engine() from an EngineConfig
   async_engine.py  background engine thread <-> asyncio bridge
   server.py        FastAPI app: POST /generate (SSE), GET /stats, GET /health
@@ -191,7 +228,8 @@ tinyserve/
   loadgen.py       async HTTP load generator
 bench/
   run.py           benchmark all strategies, save raw JSON
-  plot.py          charts + results table from that JSON
+  plot.py          charts + results tables from the JSON files
+  sweep.py         goodput vs. load sweep of the queue policies
   results/         the raw results behind every number in this README
 docs/
   make_visuals.py  animated GIFs replayed from real engine traces
@@ -217,7 +255,7 @@ All three share a FIFO waiting queue and a running list, and differ only in when
 
 - **`NaiveScheduler`** runs one request start to finish.
 - **`StaticScheduler`** boards up to `max_batch_size` requests when the batch is empty and runs them until all are done. It is given a head start: finished requests are dropped from the compute rather than decoded as padding.
-- **`ContinuousScheduler`** re-plans at every step. It first reserves KV room for every running request's next token, preempting the newest request if memory runs out. Then it admits waiting requests in FIFO order while there is a free seat, the step's token budget (`max_tokens_per_step`, which bounds how long a burst of long prompts can stall everyone else) allows it, and their KV memory fits. Newcomers are prefilled in the same step the others decode.
+- **`ContinuousScheduler`** re-plans at every step. It first reserves KV room for every running request's next token, preempting the newest request if memory runs out. Then it admits waiting requests in FIFO order (or the order of another [queue policy](#scheduling-for-goodput)) while there is a free seat, the step's token budget (`max_tokens_per_step`, which bounds how long a burst of long prompts can stall everyone else) allows it, and their KV memory fits. Newcomers are prefilled in the same step the others decode.
 
 Preemption uses **recompute**: the victim's memory is freed and it goes back to the front of the queue keeping the tokens it generated. On readmission its whole sequence is prefilled again, which costs compute but needs no extra memory (vLLM's default strategy). A test squeezes six requests into memory for two and checks that outputs are unchanged.
 
