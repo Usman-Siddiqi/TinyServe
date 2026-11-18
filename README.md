@@ -4,7 +4,7 @@
 
 **A tiny LLM inference engine, built from scratch to show how production model serving actually works.**
 
-Continuous batching · paged KV cache · prefix caching · request scheduling · token streaming.
+Continuous batching · paged KV cache · fused C++ paged attention · prefix caching · chunked prefill · speculative decoding · SLO-aware scheduling · token streaming.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -38,28 +38,31 @@ TinyServe implements all of that from scratch, measures it, and draws it.
 
 ## Results
 
-The benchmark fires the **same 200 requests** (Poisson arrivals, random prompt lengths of 16 to 192 characters and long-tailed output lengths of 10 to 300 tokens, fixed seed) at four engine configurations that share the **same model and the same KV memory budget** (8,192 token slots).
+The benchmark fires the **same 200 requests** (Poisson arrivals, random prompt lengths of 16 to 192 characters and long-tailed output lengths of 10 to 300 tokens, fixed seed) at six engine configurations that share the **same model and the same KV memory budget** (8,192 token slots).
 
 <p align="center"><img src="docs/assets/throughput.png" alt="Throughput by strategy" width="760"></p>
 
 | Strategy | Throughput (tok/s) | vs. naive | p50 latency | p95 latency | p50 TTFT | p95 TTFT | Mean batch | KV utilization |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Naive (taxi) | 428 | 1.0x | 18.72 s | 33.79 s | 18,450 ms | 33,214 ms | 1.0 | 35% |
-| Static batching (bus) | 1,152 | 2.7x | 5.66 s | 9.61 s | 5,376 ms | 8,681 ms | 7.8 | 40% |
-| Continuous batching | 1,646 | 3.8x | 3.15 s | 5.37 s | 2,279 ms | 4,434 ms | 14.7 | 36% |
-| Continuous + paged KV | 2,115 | 4.9x | 2.10 s | 3.95 s | 1,059 ms | 2,239 ms | 27.7 | 96% |
+| Naive (taxi) | 482 | 1.0x | 16.81 s | 29.63 s | 16,628 ms | 29,133 ms | 1.0 | 35% |
+| Static batching (bus) | 1,394 | 2.9x | 4.28 s | 7.23 s | 4,082 ms | 6,586 ms | 8.0 | 39% |
+| Continuous batching | 1,865 | 3.9x | 2.76 s | 4.42 s | 2,130 ms | 3,638 ms | 14.9 | 35% |
+| Continuous + paged KV | 2,271 | 4.7x | 1.59 s | 3.33 s | 676 ms | 1,611 ms | 26.8 | 96% |
+| + fused C++ attention | 2,883 | 6.0x | 0.74 s | 2.30 s | 116 ms | 468 ms | 26.4 | 96% |
+| + speculative decoding | 2,119 | 4.4x | 2.01 s | 4.09 s | 868 ms | 2,302 ms | 28.3 | 96% |
 
-Hardware: Intel(R) Xeon(R) Processor @ 2.30GHz, 4 logical cores, 4 PyTorch threads, PyTorch 2.9.1+cpu, Python 3.13.18. Commit `049f63c`, 2026-11-17T23:54:41+00:00.
+Hardware: Intel(R) Xeon(R) Processor @ 2.10GHz, 4 logical cores, 4 PyTorch threads, PyTorch 2.9.1+cpu, Python 3.13.18. Commit `c05ea46`, 2026-11-18T05:17:48+00:00.
 
-Throughput of each repeat (tok/s): Naive (taxi) 406/477/428, Static batching (bus) 1,111/1,347/1,152, Continuous batching 1,866/1,636/1,646, Continuous + paged KV 2,283/1,862/2,115.
+Throughput of each repeat (tok/s): Naive (taxi) 470/482/497, Static batching (bus) 1,404/1,358/1,394, Continuous batching 1,865/1,840/1,876, Continuous + paged KV 2,312/2,168/2,271, + fused C++ attention 2,883/2,834/2,992, + speculative decoding 2,051/2,119/2,258.
 
 **What the numbers say**
 
-- **Continuous vs. static batching: 1.4x the throughput** (1,646 vs. 1,152 tok/s) with the *same* 16-request memory limit, and p50 latency drops from 5.7 s to 3.2 s. The static batcher averages only 7.8 busy seats out of 16, because finished requests leave empty seats that cannot be refilled until the whole batch drains.
-- **Paging the KV cache: another 1.3x** (2,115 tok/s) **and half the time-to-first-token** (p50 2.3 s to 1.1 s). Nothing about the scheduler changed; the same 8,192-slot pool simply fits 27.7 running requests on average instead of 14.7, because 96% of reserved memory holds real tokens instead of 36%.
-- **End to end: 4.9x the throughput of serving one request at a time**, and the median request finishes in 2.1 s instead of 18.7 s.
-- **The trade-off is real**: a bigger batch makes each decode step slower (median time per output token goes from 5.7 ms with static batching to 13.7 ms with paging). Requests still finish much sooner because they spend far less time waiting in the queue. Production servers tune `max_batch_size` and the token budget exactly along this curve.
-- **Run-to-run noise** on the shared cloud VM is around ±10%; every repeat is listed under the table and stored in the JSON.
+- **Continuous vs. static batching: 1.3x the throughput** (1,865 vs. 1,394 tok/s) with the *same* 16-request memory limit, and p50 latency drops from 4.3 s to 2.8 s. The static batcher averages only 8.0 busy seats out of 16, because finished requests leave empty seats that cannot be refilled until the whole batch drains.
+- **Paging the KV cache: another 1.2x and a third of the time-to-first-token** (p50 2.1 s to 0.68 s). Nothing about the scheduler changed; the same 8,192-slot pool simply fits 26.8 running requests on average instead of 14.9, because 96% of reserved memory holds real tokens instead of 35%.
+- **The fused C++ attention kernel: another 1.27x, 6.0x over naive**, and p50 TTFT drops to 116 ms. Paging doubled the batch but each step got slower, because the torch path copies every sequence's K/V out of its blocks before attending. The kernel reads the blocks in place, so the median time per output token falls from 12.3 ms to 9.5 ms at the same batch size.
+- **Speculative decoding does not pay at this load** (2,119 tok/s, 0.73x the fused run). With 28 requests per step the CPU is already compute-bound, so verifying 4 drafted tokens per request costs more than the steps it saves. It wins at small batches (up to 1.75x, [below](#speculative-decoding-speculativepy-draftpy)), which is why it is off by default.
+- **End to end: 6.0x the throughput of serving one request at a time**, and the median request finishes in 0.74 s instead of 16.8 s.
+- **Run-to-run noise** on the cloud VM is a few percent; every repeat is listed under the table and stored in the JSON.
 
 <p align="center"><img src="docs/assets/latency_cdf.png" alt="Latency and time-to-first-token CDFs" width="900"></p>
 
@@ -336,7 +339,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 
 - **CPU only.** Everything runs on PyTorch's CPU kernels. Absolute numbers are tiny next to a GPU, and the shared cloud VM the benchmark ran on adds a few percent of run-to-run noise (all repeats are listed under the table).
 - **Random weights.** The output is noise. Under greedy decoding the model tends to repeat one character; use `temperature` for more varied noise.
-- **Simplified attention by default.** The default `torch` backend gathers each sequence's K/V from its blocks into a temporary dense tensor and calls PyTorch's `scaled_dot_product_attention`. That extra copy is the main cost of decoding long sequences in big batches, and it is why nearly doubling the batch with paging buys 1.3x more throughput here rather than 2x. The opt-in `cpp` backend removes it for decode only; it is float32 only and needs a C++ compiler with OpenMP. Prefill batches are padded to their longest prompt.
+- **Simplified attention by default.** The default `torch` backend gathers each sequence's K/V from its blocks into a temporary dense tensor and calls PyTorch's `scaled_dot_product_attention`. That extra copy is the main cost of decoding long sequences in big batches, and it is why nearly doubling the batch with paging buys only 1.2x more throughput here. The opt-in `cpp` backend removes it for decode (1.27x end to end); it is float32 only and needs a C++ compiler with OpenMP. Prefill batches are padded to their longest prompt.
 - **A toy model and tokenizer.** 11M parameters, a character vocabulary, learned positions instead of RoPE, float32 throughout.
 - **No prefill/decode disaggregation.** Chunked prefill is opt-in, and a step's prefill chunks and decodes still run as two forward passes.
 
