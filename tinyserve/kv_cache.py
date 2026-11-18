@@ -287,6 +287,17 @@ class KVCacheManager(ABC):
         self._lengths[seq_id] = num_tokens
         return True
 
+    def truncate(self, seq_id: int, num_tokens: int) -> None:
+        """Shrink ``seq_id`` to its first ``num_tokens`` tokens (e.g. rejected speculation)."""
+        if not 0 < num_tokens <= self._lengths[seq_id]:
+            raise ValueError(f"cannot truncate sequence {seq_id} to {num_tokens} tokens")
+        self._truncate(seq_id, num_tokens)
+        self._lengths[seq_id] = num_tokens
+
+    def length(self, seq_id: int) -> int:
+        """Tokens ``seq_id`` currently has room for."""
+        return self._lengths[seq_id]
+
     def free(self, seq_id: int) -> None:
         """Release everything held by ``seq_id``."""
         self._free(seq_id)
@@ -319,6 +330,9 @@ class KVCacheManager(ABC):
 
     @abstractmethod
     def _free(self, seq_id: int) -> None: ...
+
+    def _truncate(self, seq_id: int, num_tokens: int) -> None:  # noqa: B027 - optional hook
+        """Release memory beyond ``num_tokens``. Layouts that reserve up front keep it."""
 
     # --- addressing -------------------------------------------------------------
 
@@ -633,6 +647,11 @@ class PagedKVCache(KVCacheManager):
     def _free(self, seq_id: int) -> None:
         for block in self.block_tables.pop(seq_id):
             self.allocator.free(block)
+
+    def _truncate(self, seq_id: int, num_tokens: int) -> None:
+        table = self.block_tables[seq_id]
+        while len(table) > self.blocks_needed(num_tokens):
+            self.allocator.free(table.pop())
 
     def block_table(self, seq_ids: list[int]) -> Tensor:
         """Each sequence's block list, padded to the longest one."""

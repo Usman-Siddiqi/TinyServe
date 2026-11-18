@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 import torch
 
+from tinyserve.draft import early_exit_draft, load_distilled_draft
 from tinyserve.kv_cache import (
     ContiguousKVCache,
     KVCacheManager,
@@ -37,9 +38,17 @@ from tinyserve.scheduler import (
     Scheduler,
     StaticScheduler,
 )
+from tinyserve.speculative import (
+    DraftLengthController,
+    DraftModelProposer,
+    NgramProposer,
+    Proposer,
+    SpeculativeDecoder,
+)
 
 STRATEGIES = ("naive", "static", "continuous")
 KV_LAYOUTS = ("contiguous", "paged")
+SPEC_METHODS = ("ngram", "early-exit", "distilled")
 
 
 @dataclass(frozen=True)
@@ -79,6 +88,7 @@ class Engine:
         clock: time source, in seconds. Injectable for tests.
         record_trace: keep a :class:`StepTrace` for every step in ``self.trace``.
         attention: decode attention backend (see :class:`ModelRunner`).
+        speculator: if given, decode steps draft and verify several tokens at once.
     """
 
     def __init__(
@@ -88,10 +98,14 @@ class Engine:
         clock: Callable[[], float] = time.perf_counter,
         record_trace: bool = False,
         attention: str | None = None,
+        speculator: SpeculativeDecoder | None = None,
     ) -> None:
         self.model = model
         self.scheduler = scheduler
         self.runner = ModelRunner(model, scheduler.kv, attention)
+        self.speculator = speculator
+        if speculator is not None:
+            scheduler.num_lookahead_tokens = speculator.num_speculative_tokens
         self.clock = clock
         self.record_trace = record_trace
         self.trace: list[StepTrace] = []
@@ -129,7 +143,10 @@ class Engine:
 
     def abort(self, request_id: int) -> Request | None:
         """Cancel a request and free its memory."""
-        return self.scheduler.abort(request_id, self.clock())
+        request = self.scheduler.abort(request_id, self.clock())
+        if request is not None and self.speculator is not None:
+            self.speculator.release(request_id)
+        return request
 
     def step(self) -> list[StepOutput]:
         """Run one iteration and return the tokens it produced."""
@@ -148,26 +165,46 @@ class Engine:
         chunk_sizes = [plan.prefill_len(r) for r in plan.prefill]
         prefill_tokens = sum(chunk_sizes)
 
-        results: list[tuple[Request, int | None]] = []
+        if self.speculator is not None:
+            for req in plan.preempted:
+                self.speculator.release(req.request_id)
+
+        results: list[tuple[Request, list[int]]] = []
         if plan.prefill:
             tokens = self.runner.prefill(plan.prefill, chunk_sizes)
             for req, n in zip(plan.prefill, chunk_sizes, strict=True):
                 req.num_computed_tokens += n
-            results += zip(plan.prefill, tokens, strict=True)
-        if plan.decode:
+            results += [
+                (r, [] if t is None else [t]) for r, t in zip(plan.prefill, tokens, strict=True)
+            ]
+        if plan.decode and self.speculator is None:
             tokens = self.runner.decode(plan.decode)
             for req in plan.decode:
                 req.num_computed_tokens = req.length
-            results += zip(plan.decode, tokens, strict=True)
+            results += [(r, [t]) for r, t in zip(plan.decode, tokens, strict=True)]
+        elif plan.decode:
+            lookahead = [self.scheduler.num_lookahead(r) for r in plan.decode]
+            accepted = self.speculator.decode(self.runner, plan.decode, lookahead)
+            for req, new in zip(plan.decode, accepted, strict=True):
+                req.num_computed_tokens = req.length + len(new) - 1
+            results += zip(plan.decode, accepted, strict=True)
 
         now = self.clock()
         outputs = []
-        for req, token in results:
-            if token is None:  # a prefill chunk that has not reached the end yet
-                continue
-            req.append_token(token, now)
-            outputs.append(StepOutput(req, token, req.is_finished))
-        self.scheduler.finish_step()
+        for req, tokens in results:
+            for token in tokens:
+                req.append_token(token, now)
+                outputs.append(StepOutput(req, token, req.is_finished))
+                if req.is_finished:  # e.g. EOS in the middle of accepted drafts
+                    break
+        if self.speculator is not None:
+            # Give back the KV slots of rejected drafts.
+            for req in plan.decode:
+                if not req.is_finished:
+                    self.kv.truncate(req.request_id, req.length - 1)
+        for req in self.scheduler.finish_step():
+            if self.speculator is not None:
+                self.speculator.release(req.request_id)
 
         self.num_steps += 1
         self.num_generated_tokens += len(outputs)
@@ -226,6 +263,12 @@ class EngineConfig:
         kv_smooth_keys: for ``int8``, calibrate per-channel key smoothing at startup.
         attention: decode attention backend, ``"torch"`` or ``"cpp"``. None reads
             ``$TINYSERVE_ATTENTION`` and defaults to ``"torch"``.
+        speculative: speculative decoding proposer, one of :data:`SPEC_METHODS`,
+            or None (off). ``early-exit`` drafts with the target's first layer,
+            ``distilled`` with a small model trained by ``bench/distill_draft.py``.
+        num_speculative_tokens: most draft tokens verified per request per step.
+        adaptive_speculation: pick each request's draft length from its recent
+            acceptance rate instead of always drafting ``num_speculative_tokens``.
     """
 
     strategy: str = "naive"
@@ -245,6 +288,9 @@ class EngineConfig:
     kv_memory_bytes: int | None = None
     kv_smooth_keys: bool = True
     attention: str | None = None
+    speculative: str | None = None
+    num_speculative_tokens: int = 4
+    adaptive_speculation: bool = True
 
     @property
     def num_kv_slots(self) -> int:
@@ -266,6 +312,10 @@ def calibrate_kv(model: TinyGPT, pool: KVPool, num_seqs: int = 4) -> None:
     pool.key_smoothing = calibrate_key_smoothing(model, ids)
 
 
+# Rough cost of drafting one token relative to a target decode step (bench/spec_costs.py).
+DRAFT_COSTS = {"ngram": 0.01, "early-exit": 0.35, "distilled": 0.2}
+
+
 def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     """Construct the model, KV cache, scheduler and engine described by ``cfg``."""
     if cfg.strategy not in STRATEGIES:
@@ -278,6 +328,8 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError("queue policies other than 'fcfs' need the 'continuous' strategy")
     if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
+    if cfg.speculative is not None and cfg.speculative not in SPEC_METHODS:
+        raise ValueError(f"unknown speculative {cfg.speculative!r}; choose from {SPEC_METHODS}")
     if cfg.kv_dtype not in KV_DTYPES:
         raise ValueError(f"unknown kv_dtype {cfg.kv_dtype!r}; choose from {KV_DTYPES}")
     if cfg.enable_prefix_caching and cfg.kv_layout != "paged":
@@ -312,4 +364,32 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
             chunked_prefill=cfg.chunked_prefill,
             policy=policy,
         )
-    return Engine(model, scheduler, record_trace=record_trace, attention=cfg.attention)
+    speculator = None
+    if cfg.speculative is not None:
+        controller = None
+        if cfg.adaptive_speculation:
+            controller = DraftLengthController(DRAFT_COSTS[cfg.speculative])
+        speculator = SpeculativeDecoder(
+            _build_proposer(cfg, model), cfg.num_speculative_tokens, controller
+        )
+    return Engine(
+        model,
+        scheduler,
+        record_trace=record_trace,
+        attention=cfg.attention,
+        speculator=speculator,
+    )
+
+
+def _build_proposer(cfg: EngineConfig, model: TinyGPT) -> Proposer:
+    """The speculative proposer named by ``cfg.speculative``."""
+    if cfg.speculative == "ngram":
+        return NgramProposer()
+    if cfg.speculative == "early-exit":
+        draft = early_exit_draft(model, n_layers=1)
+    else:
+        draft = load_distilled_draft(model.cfg)
+    d = draft.cfg
+    # Same token capacity as the target: the draft caches the same sequences.
+    pool = KVPool(cfg.num_kv_slots, d.n_layers, d.n_kv_heads, d.head_dim)
+    return DraftModelProposer(draft, PagedKVCache(pool, cfg.block_size))

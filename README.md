@@ -232,6 +232,9 @@ tinyserve/
   scheduler.py     naive, static and continuous batching schedulers (+ preemption)
   policy.py        queue policies: FCFS, SJF, EDF, shortest feasible job first
   simulator.py     replays a workload through a scheduler on a virtual clock
+  speculative.py   speculative decoding: proposers, verification, adaptive draft length
+  draft.py         early-exit and distilled draft models
+  assets/          distilled draft weights (1 MB)
   engine.py        the step loop, tracing, and build_engine() from an EngineConfig
   async_engine.py  background engine thread <-> asyncio bridge
   server.py        FastAPI app: POST /generate (SSE), GET /stats, GET /health
@@ -243,6 +246,9 @@ bench/
   chunked_prefill.py  chunked vs. unchunked prefill on default and prompt-heavy workloads
   attention.py     torch vs. C++ decode attention, per step and end to end
   plot.py          charts + results tables from the JSON files
+  speculative.py   speculative vs. plain decoding, interleaved A/B
+  spec_costs.py    cost of drafting and verifying relative to a decode step
+  distill_draft.py trains the distilled draft from the target's samples
   sweep.py         goodput vs. load sweep of the queue policies
   results/         the raw results behind every number in this README
 docs/
@@ -291,6 +297,33 @@ By default, attention gathers each sequence's keys and values through those addr
 
 The `cpp` attention backend skips that copy during decode. [`csrc/paged_attention.cpp`](tinyserve/csrc/paged_attention.cpp) is a small PagedAttention-style kernel: it walks each sequence's block table and reads K/V straight from the pool, with an online softmax, no padding, OpenMP threads over (sequence, KV head) pairs, and the 4 query heads of each GQA group sharing every K/V load. A contiguous cache is treated as a paged one with a single `max_seq_len` block. It is JIT-compiled with `torch.utils.cpp_extension` on first use; if no compiler is available TinyServe warns and falls back to `torch`. Select it with `EngineConfig(attention="cpp")`, `tinyserve-server --attention cpp` or `TINYSERVE_ATTENTION=cpp`. Prefill and the bf16/int8 caches always use the torch path.
 
+### Speculative decoding (`speculative.py`, `draft.py`)
+
+Off by default; enable with `EngineConfig(speculative="distilled")` or `tinyserve-server --speculative distilled`. Each decode step a proposer drafts up to `k` tokens per request, the target scores the latest token plus all drafts in one pass over the paged cache, and the longest agreeing prefix is kept plus one token from the target. Rejected drafts are rolled back with `KVCacheManager.truncate`. Greedy requests accept exact argmax matches, so their output is identical to plain decoding (tested, and checked by the benchmark). Sampled requests use rejection sampling (Leviathan et al., 2023), which keeps the target's output distribution.
+
+Three proposers:
+
+- `ngram`: prompt lookup, copies what followed an earlier occurrence of the last few tokens. No model.
+- `early-exit`: the target's first layer plus its LM head, with its own KV cache.
+- `distilled`: a 1-layer, 128-wide model (1 MB) trained in about 4 minutes on 2 CPU threads to match the target's next-token distribution on its own samples (`bench/distill_draft.py`).
+
+A draft only helps if it agrees with the target, and this target has random weights. Its next-token distribution is close to "repeat the previous character, otherwise near uniform", and the temperature decides which part dominates. Greedy decoding repeats one character, which makes n-gram lookup look far better than it would on real text. The temperatures in the table cover the range: at 0.3 the distribution is peaked but not degenerate, so draft quality matters most there.
+
+Speedup in wall-clock time to finish a batch of 64-token requests, with a fixed `k = 4` (`adaptive_speculation=False`), median of 5 interleaved repeats on a shared 4-core VM (expect ±15% noise; raw data in `bench/results/speculative.json`):
+
+| Temperature | Draft | Tokens per verification | Batch 1 | Batch 4 | Batch 8 |
+|---|---|---:|---:|---:|---:|
+| 0 (greedy) | n-gram | 4.1 | 2.68x | 1.81x | 1.62x |
+| 0 (greedy) | distilled | 3.9 to 4.4 | 1.75x | 1.43x | 1.49x |
+| 0.3 | n-gram | 1.2 | 0.86x | 0.53x | 0.51x |
+| 0.3 | distilled | 3.3 | 1.22x | 1.03x | 0.99x |
+| 1.0 | n-gram | 1.0 | 0.82x | 0.49x | 0.47x |
+| 1.0 | distilled | 4.1 to 4.3 | 1.60x | 1.23x | 1.23x |
+
+- **The distilled draft is the only one that holds up when sampling.** On held-out samples its expected per-token acceptance is 0.84 at temperature 0.3, against 0.43 for the early-exit draft (`bench/results/distill_draft.txt`).
+- **Gains shrink with batch size.** Speculation spends extra compute to save sequential steps. At batch 1 the CPU has compute to spare; at batch 8 a plain decode step is already busy, so the extra drafted and verified tokens cost relatively more (per-step costs in `bench/results/spec_costs.txt`).
+- **Bad drafts are expensive.** With a fixed `k`, n-gram drafts at temperature > 0 halve throughput. The default `adaptive_speculation=True` estimates each request's acceptance rate and picks the draft length with the best expected tokens per unit of cost, dropping to plain decoding when drafts keep failing. In the A/B run at temperature 0.3 this lifted the early-exit draft from 0.65x/0.48x/0.42x to 1.02x/0.97x/1.03x and n-gram at batch 4 and 8 from 0.59x/0.56x to 1.07x/0.88x. It is conservative, so with a good draft it can give up some of the gain of a fixed `k`.
+
 ### Server (`async_engine.py`, `server.py`)
 
 The engine is synchronous PyTorch, so it runs in one background thread looping `engine.step()`. HTTP handlers on the asyncio loop talk to it through a thread-safe **inbox** (add / abort commands) and one `asyncio.Queue` per request that the engine thread fills via `loop.call_soon_threadsafe`. Only the engine thread touches the engine, so it needs no locks. `POST /generate` streams each token as an SSE `data:` event and ends with a summary event (finish reason, TTFT, latency). If the client disconnects mid-stream, the request is aborted and its KV blocks are freed. `GET /stats` reports queue depth, batch size, KV utilization and occupancy, preemptions and a rolling tokens/sec.
@@ -310,7 +343,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 ## Roadmap
 
 - [x] **Prefix caching**: share KV blocks between requests with a common prompt prefix (block hashing plus reference counts in the allocator).
-- [ ] **Speculative decoding**: a smaller draft model proposes several tokens and the main model verifies them in one pass.
+- [x] **Speculative decoding**: a smaller draft model proposes several tokens and the main model verifies them in one pass.
 - [x] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor (decode; `--attention cpp`).
 - [ ] **Preemption by swapping**: move a victim's blocks to a CPU-side pool instead of recomputing them.
 - [x] Chunked prefill, so long prompts never stall decoding.

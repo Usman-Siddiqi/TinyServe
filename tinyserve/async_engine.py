@@ -179,5 +179,9 @@ class AsyncEngine:
             snap["prefix_cache_hit_tokens"] = prefix.hit_tokens
             snap["prefix_cache_hit_rate"] = round(prefix.hit_rate, 4)
             snap["prefix_cache_evicted_blocks"] = prefix.evicted_blocks
+        if self.engine.speculator is not None:
+            spec = self.engine.speculator.stats
+            snap["spec_acceptance_rate"] = round(spec.acceptance_rate, 4)
+            snap["spec_tokens_per_verification"] = round(spec.tokens_per_verification, 4)
         with self._lock:
             self._snapshot = snap

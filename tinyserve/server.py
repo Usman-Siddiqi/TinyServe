@@ -25,7 +25,14 @@ from pydantic import BaseModel, Field
 
 from tinyserve.async_engine import AsyncEngine
 from tinyserve.attention import ATTENTION_BACKENDS
-from tinyserve.engine import KV_LAYOUTS, STRATEGIES, EngineConfig, StepOutput, build_engine
+from tinyserve.engine import (
+    KV_LAYOUTS,
+    SPEC_METHODS,
+    STRATEGIES,
+    EngineConfig,
+    StepOutput,
+    build_engine,
+)
 from tinyserve.kv_quant import KV_DTYPES
 from tinyserve.policy import POLICIES
 from tinyserve.request import SamplingParams
@@ -173,6 +180,10 @@ def main() -> None:
     parser.add_argument(
         "--attention", choices=ATTENTION_BACKENDS, default=None, help="decode attention backend"
     )
+    parser.add_argument(
+        "--speculative", choices=SPEC_METHODS, default=None, help="speculative decoding draft"
+    )
+    parser.add_argument("--num-speculative-tokens", type=int, default=4)
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
         args.kv_layout = "contiguous"  # paged needs preemption, which only continuous has
@@ -194,6 +205,8 @@ def main() -> None:
         kv_dtype=args.kv_dtype,
         kv_memory_bytes=None if args.kv_memory_mib is None else int(args.kv_memory_mib * 2**20),
         attention=args.attention,
+        speculative=args.speculative,
+        num_speculative_tokens=args.num_speculative_tokens,
     )
     uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
 

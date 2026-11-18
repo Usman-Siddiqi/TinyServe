@@ -44,7 +44,7 @@ tinyserve-loadgen = "tinyserve.loadgen:main"
 include = ["tinyserve*"]
 
 [tool.setuptools.package-data]
-tinyserve = ["csrc/*.cpp"]
+tinyserve = ["csrc/*.cpp", "assets/*.pt"]
 
 [tool.ruff]
 line-length = 100

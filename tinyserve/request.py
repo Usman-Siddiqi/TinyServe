@@ -108,6 +108,11 @@ class Request:
         return not self.output_ids or self.num_computed_tokens < self.length - 1
 
     @property
+    def num_remaining_tokens(self) -> int:
+        """Tokens left to generate before ``max_new_tokens`` is reached."""
+        return self.params.max_new_tokens - len(self.output_ids)
+
+    @property
     def is_finished(self) -> bool:
         """True once the request has stopped generating."""
         return self.status is RequestStatus.FINISHED

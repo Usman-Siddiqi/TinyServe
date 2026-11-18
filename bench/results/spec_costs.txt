@@ -1,0 +1,54 @@
+# bench/spec_costs.py, two runs on the shared 4-core VM (2 threads, context 96).
+# Other jobs were running; run-to-run noise is large.
+
+## Run 1
+batch 1: decode 2.29 ms
+  decode                     2.29 ms   1.00x decode
+  verify k=1                 2.50 ms   1.09x decode
+  verify k=2                 2.55 ms   1.11x decode
+  verify k=3                 3.19 ms   1.39x decode
+  verify k=4                 3.35 ms   1.46x decode
+  draft early-exit k=4       3.48 ms   1.51x decode
+  draft distilled k=4        1.98 ms   0.86x decode
+batch 4: decode 3.58 ms
+  decode                     3.58 ms   1.00x decode
+  verify k=1                 4.33 ms   1.21x decode
+  verify k=2                 5.05 ms   1.41x decode
+  verify k=3                 7.71 ms   2.15x decode
+  verify k=4                 8.22 ms   2.29x decode
+  draft early-exit k=4       4.94 ms   1.38x decode
+  draft distilled k=4        2.65 ms   0.74x decode
+batch 8: decode 5.34 ms
+  decode                     5.34 ms   1.00x decode
+  verify k=1                 9.17 ms   1.72x decode
+  verify k=2                 9.95 ms   1.86x decode
+  verify k=3                10.20 ms   1.91x decode
+  verify k=4                11.35 ms   2.12x decode
+  draft early-exit k=4       6.90 ms   1.29x decode
+  draft distilled k=4        3.44 ms   0.64x decode
+
+## Run 2
+batch 1: decode 3.10 ms
+  decode                     3.10 ms   1.00x decode
+  verify k=1                 2.84 ms   0.92x decode
+  verify k=2                 2.77 ms   0.89x decode
+  verify k=3                 7.22 ms   2.33x decode
+  verify k=4                 7.29 ms   2.35x decode
+  draft early-exit k=4       7.36 ms   2.38x decode
+  draft distilled k=4        2.09 ms   0.67x decode
+batch 4: decode 7.37 ms
+  decode                     7.37 ms   1.00x decode
+  verify k=1                 8.03 ms   1.09x decode
+  verify k=2                 8.93 ms   1.21x decode
+  verify k=3                11.74 ms   1.59x decode
+  verify k=4                12.21 ms   1.66x decode
+  draft early-exit k=4       8.68 ms   1.18x decode
+  draft distilled k=4        2.66 ms   0.36x decode
+batch 8: decode 8.92 ms
+  decode                     8.92 ms   1.00x decode
+  verify k=1                12.43 ms   1.39x decode
+  verify k=2                13.26 ms   1.49x decode
+  verify k=3                15.20 ms   1.70x decode
+  verify k=4                16.11 ms   1.81x decode
+  draft early-exit k=4      10.21 ms   1.14x decode
+  draft distilled k=4        7.13 ms   0.80x decode

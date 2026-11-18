@@ -1,0 +1,1931 @@
+[
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.18123330099979285,
+  "times_s": [
+   0.18123330099979285,
+   0.16661023500000738,
+   0.2091097659999832,
+   0.21947040099985315,
+   0.1637273850001293
+  ],
+  "tok_per_s": 353.13598354682705,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.06450331299993195,
+  "times_s": [
+   0.07108959900006084,
+   0.062259610000182875,
+   0.05936122200000682,
+   0.0711642189999111,
+   0.06450331299993195
+  ],
+  "tok_per_s": 992.1970984663612,
+  "speedup": 2.676056515604868,
+  "acceptance": 0.8984962406015038,
+  "acceptance_by_pos": [
+   0.9411764705882353,
+   0.8955223880597015,
+   0.8787878787878788,
+   0.8769230769230769
+  ],
+  "tokens_per_verify": 4.144736842105263,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.10753005399965332,
+  "times_s": [
+   0.10753005399965332,
+   0.11783648600021479,
+   0.09310391999997591,
+   0.1043863110003258,
+   0.11474696499999482
+  ],
+  "tok_per_s": 595.1824408105136,
+  "speedup": 1.6854199757063002,
+  "acceptance": 0.8241758241758241,
+  "acceptance_by_pos": [
+   0.9080459770114943,
+   0.7974683544303798,
+   0.7540983606557377,
+   0.8043478260869565
+  ],
+  "tokens_per_verify": 3.5,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.10610333599970545,
+  "times_s": [
+   0.10373590900007912,
+   0.11794969499987928,
+   0.10610333599970545,
+   0.09313748099975783,
+   0.11968524800022351
+  ],
+  "tok_per_s": 603.1855586536664,
+  "speedup": 1.747064278384591,
+  "acceptance": 0.7697368421052632,
+  "acceptance_by_pos": [
+   0.8589743589743589,
+   0.75,
+   0.7333333333333333,
+   0.7333333333333333
+  ],
+  "tokens_per_verify": 3.888888888888889,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.3304765600000792,
+  "times_s": [
+   0.2647856049998154,
+   0.3304765600000792,
+   0.26684674099988115,
+   0.35275158700005704,
+   0.49566914999968503
+  ],
+  "tok_per_s": 774.6389032854211,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.2131548469997142,
+  "times_s": [
+   0.1464251599995805,
+   0.14416449600003034,
+   0.2131548469997142,
+   0.23747712899967155,
+   0.2394493860001603
+  ],
+  "tok_per_s": 1201.004826319259,
+  "speedup": 1.8083340663624612,
+  "acceptance": 0.9123809523809524,
+  "acceptance_by_pos": [
+   0.9365671641791045,
+   0.9125475285171103,
+   0.9080459770114943,
+   0.8914728682170543
+  ],
+  "tokens_per_verify": 4.172185430463577,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.2730100339999808,
+  "times_s": [
+   0.18353057000012996,
+   0.2730100339999808,
+   0.2143315230000553,
+   0.2910399820002567,
+   0.2911857270000837
+  ],
+  "tok_per_s": 937.694473163642,
+  "speedup": 1.245018638717984,
+  "acceptance": 0.9032258064516129,
+  "acceptance_by_pos": [
+   0.9333333333333333,
+   0.8951048951048951,
+   0.8729508196721312,
+   0.901840490797546
+  ],
+  "tokens_per_verify": 3.75,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.2316410349999387,
+  "times_s": [
+   0.1870891080002366,
+   0.2316410349999387,
+   0.1781408189999638,
+   0.2907065379999949,
+   0.29393927399996755
+  ],
+  "tok_per_s": 1105.1582462497101,
+  "speedup": 1.426675372954393,
+  "acceptance": 0.8761301989150091,
+  "acceptance_by_pos": [
+   0.9330985915492958,
+   0.8821428571428571,
+   0.8523985239852399,
+   0.8339483394833949
+  ],
+  "tokens_per_verify": 4.329896907216495,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.677133756999865,
+  "times_s": [
+   0.4839658599998984,
+   0.7046555690003515,
+   0.677133756999865,
+   0.6694535500000711,
+   0.7198104989997773
+  ],
+  "tok_per_s": 756.1283050906914,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.3973447620001025,
+  "times_s": [
+   0.34434502100020836,
+   0.3973447620001025,
+   0.4192240590000438,
+   0.4154977770003825,
+   0.33816671199974735
+  ],
+  "tok_per_s": 1288.553540816194,
+  "speedup": 1.615207291811929,
+  "acceptance": 0.9091773656680932,
+  "acceptance_by_pos": [
+   0.9369202226345084,
+   0.9147727272727273,
+   0.9001919385796545,
+   0.883495145631068
+  ],
+  "tokens_per_verify": 4.144736842105263,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.4650583600000573,
+  "times_s": [
+   0.48113100399996256,
+   0.5299135989998831,
+   0.4650583600000573,
+   0.4046173439996892,
+   0.42849403000036546
+  ],
+  "tok_per_s": 1100.9370952925929,
+  "speedup": 1.4560188897577964,
+  "acceptance": 0.9102370146243066,
+  "acceptance_by_pos": [
+   0.9339080459770115,
+   0.9010416666666666,
+   0.8936170212765957,
+   0.8958333333333334
+  ],
+  "tokens_per_verify": 3.5244755244755246,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.4216623709999112,
+  "times_s": [
+   0.3828177819996199,
+   0.5413877380001395,
+   0.45514830000001893,
+   0.4216623709999112,
+   0.3928491690003284
+  ],
+  "tok_per_s": 1214.2416189186297,
+  "speedup": 1.487721160333537,
+  "acceptance": 0.8852459016393442,
+  "acceptance_by_pos": [
+   0.9378330373001776,
+   0.895870736086176,
+   0.8682745825602969,
+   0.8361266294227188
+  ],
+  "tokens_per_verify": 4.375,
+  "greedy_mismatches": 0,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.1675188059998618,
+  "times_s": [
+   0.44101331000001665,
+   0.16415045500025371,
+   0.16646904800018092,
+   0.1675188059998618,
+   0.17031783599986738
+  ],
+  "tok_per_s": 382.0466580931385,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.21382707900011155,
+  "times_s": [
+   0.33961270500003593,
+   0.17669948799994017,
+   0.19245256500016694,
+   0.21382707900011155,
+   0.23194895500000712
+  ],
+  "tok_per_s": 299.3072734252083,
+  "speedup": 0.8649874217058968,
+  "acceptance": 0.070446735395189,
+  "acceptance_by_pos": [
+   0.15333333333333332,
+   0.047619047619047616,
+   0.04195804195804196,
+   0.035211267605633804
+  ],
+  "tokens_per_verify": 1.1496350364963503,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.20036188499989294,
+  "times_s": [
+   0.2393926280001324,
+   0.20036188499989294,
+   0.13347454899985678,
+   0.19019591100004618,
+   0.2533529880001879
+  ],
+  "tok_per_s": 319.4220297939111,
+  "speedup": 0.8807697553488473,
+  "acceptance": 0.6185185185185185,
+  "acceptance_by_pos": [
+   0.7404580152671756,
+   0.5357142857142857,
+   0.5,
+   0.35294117647058826
+  ],
+  "tokens_per_verify": 2.1283783783783785,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.14963843099985752,
+  "times_s": [
+   0.3621235080004226,
+   0.1668841320001775,
+   0.1256623879999097,
+   0.14963843099985752,
+   0.12472626199996739
+  ],
+  "tok_per_s": 427.6976146593046,
+  "speedup": 1.2178533021377391,
+  "acceptance": 0.5767195767195767,
+  "acceptance_by_pos": [
+   0.7604166666666666,
+   0.6210526315789474,
+   0.5,
+   0.41935483870967744
+  ],
+  "tokens_per_verify": 3.247422680412371,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.249449967000146,
+  "times_s": [
+   0.4695170939999116,
+   0.24166903200011802,
+   0.34094379199996183,
+   0.249449967000146,
+   0.24785651499996675
+  ],
+  "tok_per_s": 1026.2579028517177,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.4861068210002486,
+  "times_s": [
+   0.6701559850002923,
+   0.4538553149996005,
+   0.9199773010000172,
+   0.42503388699969946,
+   0.4861068210002486
+  ],
+  "tok_per_s": 526.6332191620678,
+  "speedup": 0.5324803390268344,
+  "acceptance": 0.0873582528349433,
+  "acceptance_by_pos": [
+   0.16938110749185667,
+   0.08471760797342193,
+   0.05281090289608177,
+   0.03806228373702422
+  ],
+  "tokens_per_verify": 1.1977186311787071,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.224123648999921,
+  "times_s": [
+   0.224123648999921,
+   0.21017882000023747,
+   0.2218047800001841,
+   0.24330388600037622,
+   0.2498901549997754
+  ],
+  "tok_per_s": 1142.2266286592999,
+  "speedup": 1.1498258102307597,
+  "acceptance": 0.7072205736894164,
+  "acceptance_by_pos": [
+   0.7798507462686567,
+   0.653012048192771,
+   0.4642857142857143,
+   0.0
+  ],
+  "tokens_per_verify": 2.311926605504587,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.23725565100039603,
+  "times_s": [
+   0.2341811759997654,
+   0.23725565100039603,
+   0.2333004609999989,
+   0.24285490100010065,
+   0.3107050909998179
+  ],
+  "tok_per_s": 1079.0048579267461,
+  "speedup": 1.0271564048033874,
+  "acceptance": 0.6126126126126126,
+  "acceptance_by_pos": [
+   0.8043478260869565,
+   0.6721763085399449,
+   0.5223463687150838,
+   0.4435028248587571
+  ],
+  "tokens_per_verify": 3.351063829787234,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.36024223399999755,
+  "times_s": [
+   0.3425251849998858,
+   0.45261075999997047,
+   0.4054185730001336,
+   0.35005887300030736,
+   0.36024223399999755
+  ],
+  "tok_per_s": 1421.265891883192,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.7113791189999574,
+  "times_s": [
+   0.7113791189999574,
+   0.6584140109998771,
+   0.7987457159997575,
+   0.8326558610001484,
+   0.623082830000385
+  ],
+  "tok_per_s": 719.728744245065,
+  "speedup": 0.5075690108618457,
+  "acceptance": 0.08502695976773122,
+  "acceptance_by_pos": [
+   0.17071197411003236,
+   0.08709942481511915,
+   0.049413735343383586,
+   0.02893617021276596
+  ],
+  "tokens_per_verify": 1.1943127962085307,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.39109456899996076,
+  "times_s": [
+   0.4112579319998986,
+   0.37014060799992876,
+   0.39109456899996076,
+   0.4017936249997547,
+   0.37987960200007365
+  ],
+  "tok_per_s": 1309.1462796560884,
+  "speedup": 0.948306337332447,
+  "acceptance": 0.7533577533577533,
+  "acceptance_by_pos": [
+   0.7904,
+   0.634020618556701
+  ],
+  "tokens_per_verify": 1.9595645412130638,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.36603223700012677,
+  "times_s": [
+   0.3464252629996736,
+   0.3851072839997869,
+   0.447134996999921,
+   0.36603223700012677,
+   0.3572344039998825
+  ],
+  "tok_per_s": 1398.7839000088472,
+  "speedup": 0.9887419353715222,
+  "acceptance": 0.6049467536928891,
+  "acceptance_by_pos": [
+   0.8029689608636977,
+   0.6461748633879781,
+   0.5242047026279392,
+   0.43916083916083914
+  ],
+  "tokens_per_verify": 3.3201581027667983,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 1.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.17182406699976127,
+  "times_s": [
+   0.17182406699976127,
+   0.16953768600023977,
+   0.17184602899988022,
+   0.1745236010001463,
+   0.16476402900025278
+  ],
+  "tok_per_s": 372.4740143654551,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 1.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.20751463099986722,
+  "times_s": [
+   0.25355508899974666,
+   0.21522342199978084,
+   0.20751463099986722,
+   0.20417679000001954,
+   0.2009837460000199
+  ],
+  "tok_per_s": 308.4119885505372,
+  "speedup": 0.8197878300080866,
+  "acceptance": 0.0017793594306049821,
+  "acceptance_by_pos": [
+   0.006896551724137931,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "tokens_per_verify": 1.0031847133757963,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 1.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.09796251899979325,
+  "times_s": [
+   0.19362323700033812,
+   0.09796251899979325,
+   0.10324879000017972,
+   0.0905884890003108,
+   0.09575989099994331
+  ],
+  "tok_per_s": 653.3110893170792,
+  "speedup": 1.720595410873539,
+  "acceptance": 0.8810408921933085,
+  "acceptance_by_pos": [
+   0.9466666666666667,
+   0.9054054054054054,
+   0.8333333333333334,
+   0.8148148148148148
+  ],
+  "tokens_per_verify": 4.038461538461538,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 1.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.10614686400003848,
+  "times_s": [
+   0.11248628599969379,
+   0.10614686400003848,
+   0.10305775400001949,
+   0.0985149560001446,
+   0.20211534299960476
+  ],
+  "tok_per_s": 602.9382083297044,
+  "speedup": 1.5971991975210715,
+  "acceptance": 0.8253424657534246,
+  "acceptance_by_pos": [
+   0.918918918918919,
+   0.8243243243243243,
+   0.7945205479452054,
+   0.7605633802816901
+  ],
+  "tokens_per_verify": 4.256756756756757,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 1.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.3876430650002476,
+  "times_s": [
+   0.5443404570000894,
+   0.3862905410001076,
+   0.37947989800022697,
+   0.3876430650002476,
+   0.556673760999729
+  ],
+  "tok_per_s": 660.4013411147611,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 1.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.8581334760001482,
+  "times_s": [
+   0.8581334760001482,
+   0.7949039739996806,
+   1.0898604369999703,
+   1.0922636710001825,
+   0.7110110859998713
+  ],
+  "tok_per_s": 298.32188949584315,
+  "speedup": 0.48595874927688165,
+  "acceptance": 0.002716161158895428,
+  "acceptance_by_pos": [
+   0.010507880910683012,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "tokens_per_verify": 1.0047846889952152,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 1.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.3406160570002612,
+  "times_s": [
+   0.3250545660002899,
+   0.3406160570002612,
+   0.4119599709997601,
+   0.43375788100001955,
+   0.20704512499969496
+  ],
+  "tok_per_s": 751.579365501855,
+  "speedup": 1.1340937488446452,
+  "acceptance": 0.8191190253045924,
+  "acceptance_by_pos": [
+   0.8992042440318302,
+   0.8289855072463768,
+   0.7222222222222222,
+   0.7204301075268817
+  ],
+  "tokens_per_verify": 3.2642487046632125,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 1.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.3143918020000456,
+  "times_s": [
+   0.40418671800034645,
+   0.3143918020000456,
+   0.31072377200007395,
+   0.32565587499993853,
+   0.19784390099994198
+  ],
+  "tok_per_s": 814.2705960251562,
+  "speedup": 1.228691519761866,
+  "acceptance": 0.8106960950764007,
+  "acceptance_by_pos": [
+   0.92,
+   0.8243243243243243,
+   0.7610921501706485,
+   0.7335640138408305
+  ],
+  "tokens_per_verify": 4.131147540983607,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 1.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.3445410620001894,
+  "times_s": [
+   0.3445410620001894,
+   0.3253864979997161,
+   0.33588085600013073,
+   0.35414831900016,
+   0.40417103599975235
+  ],
+  "tok_per_s": 1486.0347763127245,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 1.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.7298951479997413,
+  "times_s": [
+   0.7335267429998567,
+   0.7051582209996923,
+   0.735184610000033,
+   0.6856244579998929,
+   0.7298951479997413
+  ],
+  "tok_per_s": 701.470617256633,
+  "speedup": 0.46970484074124175,
+  "acceptance": 0.003416856492027335,
+  "acceptance_by_pos": [
+   0.013250883392226149,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "tokens_per_verify": 1.0059880239520957,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 1.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.29762007299996185,
+  "times_s": [
+   0.3873109409996687,
+   0.28776693100007833,
+   0.29762007299996185,
+   0.3433529050003017,
+   0.2894849469998917
+  ],
+  "tok_per_s": 1720.314073036551,
+  "speedup": 1.1285557879698989,
+  "acceptance": 0.8697394789579158,
+  "acceptance_by_pos": [
+   0.9233766233766234,
+   0.8585365853658536,
+   0.8218527315914489,
+   0.7947368421052632
+  ],
+  "tokens_per_verify": 3.2142857142857144,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 1.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.27489972500006843,
+  "times_s": [
+   0.27489972500006843,
+   0.26410140100006174,
+   0.34648035999998683,
+   0.3351382509999894,
+   0.2743215339996823
+  ],
+  "tok_per_s": 1862.4973160663312,
+  "speedup": 1.2320513892300027,
+  "acceptance": 0.825451418744626,
+  "acceptance_by_pos": [
+   0.9292929292929293,
+   0.8449744463373083,
+   0.7827586206896552,
+   0.7398230088495575
+  ],
+  "tokens_per_verify": 4.2,
+  "greedy_mismatches": null,
+  "run": "main (5 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.16661866499998723,
+  "times_s": [
+   0.16088145899993833,
+   0.16661866499998723,
+   0.17077959500011275
+  ],
+  "tok_per_s": 384.11062770191387,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.07437719100016693,
+  "times_s": [
+   0.07437719100016693,
+   0.06533140800002002,
+   0.07556088599994837
+  ],
+  "tok_per_s": 860.4788529840602,
+  "speedup": 2.260158714923346,
+  "acceptance": 0.8924050632911392,
+  "acceptance_by_pos": [
+   0.9302325581395349,
+   0.8604651162790697,
+   0.8717948717948718,
+   0.9090909090909091
+  ],
+  "tokens_per_verify": 3.9375,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.06698429000016404,
+  "times_s": [
+   0.07309448799969687,
+   0.06162408099999084,
+   0.06698429000016404
+  ],
+  "tok_per_s": 955.4479117393537,
+  "speedup": 2.5495469907898483,
+  "acceptance": 0.8606060606060606,
+  "acceptance_by_pos": [
+   0.9285714285714286,
+   0.8571428571428571,
+   0.8292682926829268,
+   0.825
+  ],
+  "tokens_per_verify": 4.0212765957446805,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.11397379800018825,
+  "times_s": [
+   0.11397379800018825,
+   0.12208104499995898,
+   0.10175387900017085
+  ],
+  "tok_per_s": 561.5325725996627,
+  "speedup": 1.411565305559727,
+  "acceptance": 0.9659863945578231,
+  "acceptance_by_pos": [
+   0.9787234042553191,
+   0.9473684210526315,
+   0.9696969696969697,
+   0.9655172413793104
+  ],
+  "tokens_per_verify": 4.0212765957446805,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.11323160699976142,
+  "times_s": [
+   0.11323160699976142,
+   0.11871668999992835,
+   0.1038954300001933
+  ],
+  "tok_per_s": 565.2132094189465,
+  "speedup": 1.4208175902712155,
+  "acceptance": 0.925,
+  "acceptance_by_pos": [
+   0.975609756097561,
+   0.95,
+   0.9,
+   0.8717948717948718
+  ],
+  "tokens_per_verify": 4.609756097560975,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.11445756800003437,
+  "times_s": [
+   0.1169730729998264,
+   0.11445756800003437,
+   0.08231341700002304
+  ],
+  "tok_per_s": 559.159181155944,
+  "speedup": 1.455724316979522,
+  "acceptance": 0.8098159509202454,
+  "acceptance_by_pos": [
+   0.8928571428571429,
+   0.7959183673469388,
+   0.7352941176470589,
+   0.75
+  ],
+  "tokens_per_verify": 3.3157894736842106,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.10447780599997714,
+  "times_s": [
+   0.10447780599997714,
+   0.11413143799973113,
+   0.08380866800007425
+  ],
+  "tok_per_s": 612.5702907660026,
+  "speedup": 1.539862533100796,
+  "acceptance": 0.7354497354497355,
+  "acceptance_by_pos": [
+   0.8125,
+   0.723404255319149,
+   0.7021276595744681,
+   0.7021276595744681
+  ],
+  "tokens_per_verify": 3.78,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.26174402700007704,
+  "times_s": [
+   0.2562832030002937,
+   0.3095520150000084,
+   0.26174402700007704
+  ],
+  "tok_per_s": 978.0547924401142,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.15495967400011068,
+  "times_s": [
+   0.17229514100017695,
+   0.15495967400011068,
+   0.13058750200025315
+  ],
+  "tok_per_s": 1652.0427114464449,
+  "speedup": 1.9976294929465797,
+  "acceptance": 0.9406919275123559,
+  "acceptance_by_pos": [
+   0.9695121951219512,
+   0.9444444444444444,
+   0.9310344827586207,
+   0.9117647058823529
+  ],
+  "tokens_per_verify": 4.0864864864864865,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.14848466100011137,
+  "times_s": [
+   0.14848466100011137,
+   0.14857705599979454,
+   0.13658110599999418
+  ],
+  "tok_per_s": 1724.083809571468,
+  "speedup": 1.916399966772038,
+  "acceptance": 0.9140127388535032,
+  "acceptance_by_pos": [
+   0.95,
+   0.9113924050632911,
+   0.9038461538461539,
+   0.8896103896103896
+  ],
+  "tokens_per_verify": 4.153846153846154,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.20189085199990586,
+  "times_s": [
+   0.20189085199990586,
+   0.1969423860000461,
+   0.2116582090002339
+  ],
+  "tok_per_s": 1268.0118859477564,
+  "speedup": 1.2694146389575554,
+  "acceptance": 0.9618055555555556,
+  "acceptance_by_pos": [
+   0.9747474747474747,
+   0.954248366013072,
+   0.9586776859504132,
+   0.9519230769230769
+  ],
+  "tokens_per_verify": 3.742574257425743,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.20480474399982995,
+  "times_s": [
+   0.20480474399982995,
+   0.19523517299967352,
+   0.21061513899985584
+  ],
+  "tok_per_s": 1249.9710455936145,
+  "speedup": 1.2513538407123348,
+  "acceptance": 0.9411764705882353,
+  "acceptance_by_pos": [
+   0.9691358024691358,
+   0.9556962025316456,
+   0.9225806451612903,
+   0.9155844155844156
+  ],
+  "tokens_per_verify": 4.609756097560975,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.1906190150002658,
+  "times_s": [
+   0.1906190150002658,
+   0.2079843090000395,
+   0.17588257900024473
+  ],
+  "tok_per_s": 1342.9929852467396,
+  "speedup": 1.48817482941112,
+  "acceptance": 0.8851132686084142,
+  "acceptance_by_pos": [
+   0.9174757281553398,
+   0.8757062146892656,
+   0.8523489932885906,
+   0.8837209302325582
+  ],
+  "tokens_per_verify": 3.617224880382775,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.18324950999976863,
+  "times_s": [
+   0.18324950999976863,
+   0.2715940269999919,
+   0.1801104160003888
+  ],
+  "tok_per_s": 1397.002371249578,
+  "speedup": 1.398547821495497,
+  "acceptance": 0.8577777777777778,
+  "acceptance_by_pos": [
+   0.9132947976878613,
+   0.8647058823529412,
+   0.8313253012048193,
+   0.8192771084337349
+  ],
+  "tokens_per_verify": 4.271186440677966,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.34480337400009375,
+  "times_s": [
+   0.3347345350002797,
+   0.36461743200015917,
+   0.34480337400009375
+  ],
+  "tok_per_s": 1484.904263146395,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.22556624699973327,
+  "times_s": [
+   0.22556624699973327,
+   0.2420238300001074,
+   0.19625165900015418
+  ],
+  "tok_per_s": 2269.843147235612,
+  "speedup": 1.5065352531608038,
+  "acceptance": 0.9159802306425041,
+  "acceptance_by_pos": [
+   0.9289772727272727,
+   0.9129129129129129,
+   0.916083916083916,
+   0.9012345679012346
+  ],
+  "tokens_per_verify": 3.78,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.273510903999977,
+  "times_s": [
+   0.24515863899978285,
+   0.2795700990000114,
+   0.273510903999977
+  ],
+  "tok_per_s": 1871.9546186723255,
+  "speedup": 1.3042075433115052,
+  "acceptance": 0.8977183320220299,
+  "acceptance_by_pos": [
+   0.9323076923076923,
+   0.903125,
+   0.8857142857142857,
+   0.8681672025723473
+  ],
+  "tokens_per_verify": 4.0754716981132075,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.3245632579996709,
+  "times_s": [
+   0.46225860899994586,
+   0.3245632579996709,
+   0.301094773999921
+  ],
+  "tok_per_s": 1577.5044999102122,
+  "speedup": 1.1234094525897595,
+  "acceptance": 0.9571286141575274,
+  "acceptance_by_pos": [
+   0.9689922480620154,
+   0.9672131147540983,
+   0.9528301886792453,
+   0.91875
+  ],
+  "tokens_per_verify": 2.739130434782609,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.31881979299987506,
+  "times_s": [
+   0.31881979299987506,
+   0.2868506609997894,
+   0.38668422000000646
+  ],
+  "tok_per_s": 1605.9228794499613,
+  "speedup": 1.049917672458971,
+  "acceptance": 0.9291896144767899,
+  "acceptance_by_pos": [
+   0.9661538461538461,
+   0.940809968847352,
+   0.910828025477707,
+   0.8971061093247589
+  ],
+  "tokens_per_verify": 4.56797583081571,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.3207088429999203,
+  "times_s": [
+   0.32583189800016044,
+   0.3207088429999203,
+   0.24629700000014054
+  ],
+  "tok_per_s": 1596.4636185604872,
+  "speedup": 1.1369110642211064,
+  "acceptance": 0.8897243107769424,
+  "acceptance_by_pos": [
+   0.9174311926605505,
+   0.8760330578512396,
+   0.8582677165354331,
+   0.8958333333333334
+  ],
+  "tokens_per_verify": 3.38255033557047,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.0,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.27124119299969607,
+  "times_s": [
+   0.37308901999995214,
+   0.27124119299969607,
+   0.252529708000111
+  ],
+  "tok_per_s": 1887.618891281656,
+  "speedup": 1.344255376433799,
+  "acceptance": 0.8604305864884929,
+  "acceptance_by_pos": [
+   0.9188405797101449,
+   0.8676470588235294,
+   0.8368580060422961,
+   0.8157099697885196
+  ],
+  "tokens_per_verify": 4.28328611898017,
+  "greedy_mismatches": 0,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.21275117799996224,
+  "times_s": [
+   0.164463982000143,
+   0.21275117799996224,
+   0.3158877979999488
+  ],
+  "tok_per_s": 300.82089604228355,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.17668914699970628,
+  "times_s": [
+   0.17668914699970628,
+   0.1971898360002342,
+   0.17031898699997328
+  ],
+  "tok_per_s": 362.21805972104437,
+  "speedup": 1.078915538018448,
+  "acceptance": 0.1206896551724138,
+  "acceptance_by_pos": [
+   0.11904761904761904,
+   0.18181818181818182,
+   0.0
+  ],
+  "tokens_per_verify": 1.0384615384615385,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.22460782500002097,
+  "times_s": [
+   0.22460782500002097,
+   0.17035388200019952,
+   0.25709540799971364
+  ],
+  "tok_per_s": 284.9410967760986,
+  "speedup": 1.2286792691384851,
+  "acceptance": 0.07065217391304347,
+  "acceptance_by_pos": [
+   0.1595744680851064,
+   0.043010752688172046,
+   0.04395604395604396,
+   0.03333333333333333
+  ],
+  "tokens_per_verify": 1.1595092024539877,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.2076396840002417,
+  "times_s": [
+   0.22613412800001242,
+   0.2076396840002417,
+   0.19127245600020615
+  ],
+  "tok_per_s": 308.2262444587688,
+  "speedup": 1.024617134361053,
+  "acceptance": 0.46153846153846156,
+  "acceptance_by_pos": [
+   0.4594594594594595,
+   0.5
+  ],
+  "tokens_per_verify": 1.105263157894737,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.28927092999992965,
+  "times_s": [
+   0.2764816389999396,
+   0.32605141100020774,
+   0.28927092999992965
+  ],
+  "tok_per_s": 221.24587493121263,
+  "speedup": 0.6525080733351794,
+  "acceptance": 0.19477434679334918,
+  "acceptance_by_pos": [
+   0.45794392523364486,
+   0.16981132075471697,
+   0.11538461538461539,
+   0.028846153846153848
+  ],
+  "tokens_per_verify": 1.766355140186916,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.16107377400021505,
+  "times_s": [
+   0.19822472999976526,
+   0.16107377400021505,
+   0.13868973699982234
+  ],
+  "tok_per_s": 397.3334603801768,
+  "speedup": 1.3208306524169364,
+  "acceptance": 0.5949367088607594,
+  "acceptance_by_pos": [
+   0.7088607594936709,
+   0.52,
+   0.45,
+   0.3333333333333333
+  ],
+  "tokens_per_verify": 1.9894736842105263,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 1,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.13558895699998175,
+  "times_s": [
+   0.13558895699998175,
+   0.146491106999747,
+   0.12429754200002208
+  ],
+  "tok_per_s": 472.0148411497008,
+  "speedup": 1.452314630951145,
+  "acceptance": 0.5695652173913044,
+  "acceptance_by_pos": [
+   0.7068965517241379,
+   0.6379310344827587,
+   0.5087719298245614,
+   0.42105263157894735
+  ],
+  "tokens_per_verify": 3.2586206896551726,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.4250931030001084,
+  "times_s": [
+   0.2748335109999971,
+   0.5063290739999502,
+   0.4250931030001084
+  ],
+  "tok_per_s": 602.221015098273,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.3970005719997971,
+  "times_s": [
+   0.3281250340000952,
+   0.41998733700029334,
+   0.3970005719997971
+  ],
+  "tok_per_s": 644.8353429579714,
+  "speedup": 1.0707619408677467,
+  "acceptance": 0.2087912087912088,
+  "acceptance_by_pos": [
+   0.21739130434782608,
+   0.14285714285714285
+  ],
+  "tokens_per_verify": 1.052924791086351,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.7734004439998898,
+  "times_s": [
+   0.46443529799989847,
+   0.7734004439998898,
+   1.030670427000132
+  ],
+  "tok_per_s": 331.0057577365917,
+  "speedup": 0.5917584476967493,
+  "acceptance": 0.0728959575878065,
+  "acceptance_by_pos": [
+   0.14987080103359174,
+   0.06561679790026247,
+   0.04289544235924933,
+   0.029891304347826088
+  ],
+  "tokens_per_verify": 1.1702786377708978,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.4404174609999245,
+  "times_s": [
+   0.28575182700024016,
+   0.44879891299979136,
+   0.4404174609999245
+  ],
+  "tok_per_s": 581.2666905139891,
+  "speedup": 0.9652049263327942,
+  "acceptance": 0.4,
+  "acceptance_by_pos": [
+   0.4
+  ],
+  "tokens_per_verify": 1.0558659217877095,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.8799462730003142,
+  "times_s": [
+   0.8799462730003142,
+   0.8304691789999197,
+   0.8862956170000871
+  ],
+  "tok_per_s": 290.92685298515784,
+  "speedup": 0.4796290254023299,
+  "acceptance": 0.212406015037594,
+  "acceptance_by_pos": [
+   0.45965770171149145,
+   0.2064676616915423,
+   0.11139240506329114,
+   0.06153846153846154
+  ],
+  "tokens_per_verify": 1.8129496402877698,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.34098092899967014,
+  "times_s": [
+   0.34098092899967014,
+   0.33019847400009894,
+   0.3953812579998157
+  ],
+  "tok_per_s": 750.7751261955406,
+  "speedup": 1.0751473277984929,
+  "acceptance": 0.7024793388429752,
+  "acceptance_by_pos": [
+   0.7723076923076924,
+   0.6567796610169492,
+   0.475,
+   0.0
+  ],
+  "tokens_per_verify": 2.283987915407855,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 4,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.6306071549997796,
+  "times_s": [
+   0.6427732590000232,
+   0.3705814869999813,
+   0.6306071549997796
+  ],
+  "tok_per_s": 405.9579691893751,
+  "speedup": 0.6741013000403666,
+  "acceptance": 0.625,
+  "acceptance_by_pos": [
+   0.7880184331797235,
+   0.6883720930232559,
+   0.5446009389671361,
+   0.47393364928909953
+  ],
+  "tokens_per_verify": 3.420814479638009,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "plain",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.5834401309998611,
+  "times_s": [
+   0.546665239000049,
+   0.5834401309998611,
+   0.7528934210004081
+  ],
+  "tok_per_s": 877.5536216930574,
+  "speedup": 1.0,
+  "acceptance": null,
+  "acceptance_by_pos": null,
+  "tokens_per_verify": 1.0,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.6232240980002643,
+  "times_s": [
+   0.6232240980002643,
+   0.38130803800004287,
+   0.9441405430002305
+  ],
+  "tok_per_s": 821.5343431726269,
+  "speedup": 0.8771567735492429,
+  "acceptance": 0.26495726495726496,
+  "acceptance_by_pos": [
+   0.26495726495726496
+  ],
+  "tokens_per_verify": 1.042758620689655,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "ngram-fixed",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 1.3431226579996292,
+  "times_s": [
+   1.4814738959998976,
+   0.6158984710000368,
+   1.3431226579996292
+  ],
+  "tok_per_s": 381.20122309792896,
+  "speedup": 0.5605544784135538,
+  "acceptance": 0.07488402915838303,
+  "acceptance_by_pos": [
+   0.15304798962386512,
+   0.07349081364829396,
+   0.04679144385026738,
+   0.023066485753052916
+  ],
+  "tokens_per_verify": 1.1757387247278384,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.6479101979998632,
+  "times_s": [
+   0.6479101979998632,
+   0.5659960600000886,
+   0.7341856849998294
+  ],
+  "tok_per_s": 790.2329699093702,
+  "speedup": 1.0254809326615828,
+  "acceptance": 0.45454545454545453,
+  "acceptance_by_pos": [
+   0.45454545454545453
+  ],
+  "tokens_per_verify": 1.0558659217877095,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "early-exit-fixed",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 1.3738926080000056,
+  "times_s": [
+   1.313406770000256,
+   1.5109212450001905,
+   1.3738926080000056
+  ],
+  "tok_per_s": 372.66377082072336,
+  "speedup": 0.41621929434697713,
+  "acceptance": 0.2100031065548307,
+  "acceptance_by_pos": [
+   0.4422843256379101,
+   0.20221948212083848,
+   0.11668757841907151,
+   0.06979695431472081
+  ],
+  "tokens_per_verify": 1.8086124401913874,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": true,
+  "median_s": 0.5890717920001407,
+  "times_s": [
+   0.38577280100025746,
+   0.6970853689999785,
+   0.5890717920001407
+  ],
+  "tok_per_s": 869.1640084505653,
+  "speedup": 1.2781012963530738,
+  "acceptance": 0.7569169960474308,
+  "acceptance_by_pos": [
+   0.8011126564673157,
+   0.6484641638225256
+  ],
+  "tokens_per_verify": 2.026809651474531,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ },
+ {
+  "config": "distilled-fixed",
+  "temperature": 0.3,
+  "batch_size": 8,
+  "k": 4,
+  "adaptive": false,
+  "median_s": 0.5973918710001271,
+  "times_s": [
+   0.34787585000003673,
+   0.5973918710001271,
+   0.7802380119996997
+  ],
+  "tok_per_s": 857.0588668085359,
+  "speedup": 0.9766455811042279,
+  "acceptance": 0.6068767908309456,
+  "acceptance_by_pos": [
+   0.7895927601809954,
+   0.6438356164383562,
+   0.5345622119815668,
+   0.4547563805104408
+  ],
+  "tokens_per_verify": 3.337748344370861,
+  "greedy_mismatches": null,
+  "run": "adaptive vs fixed (3 repeats)"
+ }
+]
