@@ -37,12 +37,19 @@ from tinyserve.request import Request, SamplingParams
 from tinyserve.tokenizer import CharTokenizer
 from tinyserve.workload import WorkloadItem, WorkloadSpec, make_workload
 
-# name -> (strategy, kv layout). Same memory budget for all of them.
-RUNS: dict[str, tuple[str, str]] = {
-    "naive": ("naive", "contiguous"),
-    "static": ("static", "contiguous"),
-    "continuous": ("continuous", "contiguous"),
-    "continuous+paged": ("continuous", "paged"),
+# name -> EngineConfig overrides. Same memory budget for all of them.
+RUNS: dict[str, dict[str, Any]] = {
+    "naive": {"strategy": "naive", "kv_layout": "contiguous"},
+    "static": {"strategy": "static", "kv_layout": "contiguous"},
+    "continuous": {"strategy": "continuous", "kv_layout": "contiguous"},
+    "continuous+paged": {"strategy": "continuous", "kv_layout": "paged"},
+    "+fused attention": {"strategy": "continuous", "kv_layout": "paged", "attention": "cpp"},
+    "+speculative": {
+        "strategy": "continuous",
+        "kv_layout": "paged",
+        "attention": "cpp",
+        "speculative": "distilled",
+    },
 }
 MAX_TIMELINE_POINTS = 3000
 
@@ -221,8 +228,7 @@ def main() -> None:
     runs: dict[str, list[dict[str, Any]]] = {name: [] for name in args.runs}
     for rep in range(args.repeats):
         for name in args.runs:
-            strategy, layout = RUNS[name]
-            cfg = replace(base, strategy=strategy, kv_layout=layout)
+            cfg = replace(base, **RUNS[name])
             engine = build_engine(cfg, record_trace=True)
             warm_up(engine)
             requests, t0, t_end = drive(engine, items)
@@ -248,10 +254,8 @@ def main() -> None:
     for name, reps in runs.items():
         reps_sorted = sorted(reps, key=lambda r: r["summary"]["throughput_tok_s"])
         median = reps_sorted[len(reps_sorted) // 2]
-        strategy, layout = RUNS[name]
         results[name] = {
-            "strategy": strategy,
-            "kv_layout": layout,
+            **RUNS[name],
             **median,
             "repeat_summaries": [r["summary"] for r in reps],
         }

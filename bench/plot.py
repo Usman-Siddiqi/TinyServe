@@ -22,8 +22,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Entity -> color is fixed, so a strategy has the same color in every chart.
-ORDER = ["naive", "static", "continuous", "continuous+paged"]
+ORDER = ["naive", "static", "continuous", "continuous+paged", "+fused attention", "+speculative"]
 COLORS = {
+    "+speculative": "#c2347a",
+    "+fused attention": "#7b4fd1",
     "continuous+paged": "#2a78d6",
     "continuous": "#eb6834",
     "static": "#1baf7a",
@@ -34,6 +36,8 @@ LABELS = {
     "static": "Static batching (bus)",
     "continuous": "Continuous batching",
     "continuous+paged": "Continuous + paged KV",
+    "+fused attention": "+ fused C++ attention",
+    "+speculative": "+ speculative decoding",
 }
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
@@ -219,6 +223,8 @@ def plot_batch_size(data: dict[str, Any], out: Path) -> None:
 
 
 POLICY_COLORS = {
+    "+speculative": "#c2347a",
+    "+fused attention": "#7b4fd1",
     "fcfs": "#2a78d6",
     "sjf": "#1baf7a",
     "edf": "#eda100",
