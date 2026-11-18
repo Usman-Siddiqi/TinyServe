@@ -107,10 +107,20 @@ def main() -> None:
     parser.add_argument("--num-requests", type=int, default=50)
     parser.add_argument("--rate", type=float, default=5.0, help="mean requests per second")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--system-prompts",
+        type=int,
+        default=0,
+        help="if > 0, prefix every prompt with one of this many shared system prompts",
+    )
     parser.add_argument("--json", dest="json_path", help="write per-request results here")
     args = parser.parse_args()
 
-    spec = WorkloadSpec(num_requests=args.num_requests, rate=args.rate, seed=args.seed)
+    common = {"num_requests": args.num_requests, "rate": args.rate, "seed": args.seed}
+    if args.system_prompts > 0:
+        spec = WorkloadSpec.shared_prefix(args.system_prompts, **common)
+    else:
+        spec = WorkloadSpec(**common)
     results, wall = asyncio.run(run(args.url.rstrip("/"), make_workload(spec)))
     summary = summarize(results, wall)
     for key, value in summary.items():
