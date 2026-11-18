@@ -126,3 +126,15 @@ def test_abort_mid_prefill_frees_memory(model: TinyGPT) -> None:
     assert req.finish_reason is FinishReason.ABORTED
     assert kv.allocator.num_free == kv.allocator.num_blocks
     assert not engine.has_unfinished()
+
+
+def test_preempted_decodes_recompute_in_chunks(model: TinyGPT) -> None:
+    """Requests preempted after generating tokens re-prefill prompt + outputs in chunks."""
+    prompts = make_prompts(6, seed=4, min_len=20, max_len=30)
+    params = SamplingParams(max_new_tokens=24, ignore_eos=True)
+    kv = PagedKVCache(pool(128), block_size=8, watermark=0)
+    sched = RecordingScheduler(kv, max_batch_size=6, max_tokens_per_step=8, chunked_prefill=True)
+    engine = Engine(model, sched)
+    for req, prompt in zip(engine.generate(prompts, params), prompts, strict=True):
+        assert req.output_ids == reference_generate(model, prompt, params)
+    assert any(length > 30 for _, length in sched.victims)  # victims that had outputs

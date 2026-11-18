@@ -104,7 +104,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,bench]"
 
-pytest                      # 53 tests, a few seconds
+pytest                      # 54 tests, a few seconds
 ```
 
 **Run the server** (continuous batching with a paged KV cache by default):
