@@ -1,0 +1,52 @@
+[1/3] default unchunked: throughput_tok_s 2.17e+03, ttft_p50_s 0.988, itl_p99_ms 46.4, itl_max_ms 95.9
+[1/3] default chunked-256: throughput_tok_s 2.14e+03, ttft_p50_s 0.797, itl_p99_ms 40.4, itl_max_ms 110
+[1/3] prompt-heavy unchunked: throughput_tok_s 1.24e+03, ttft_p50_s 0.0282, itl_p99_ms 41, itl_max_ms 95.8
+[1/3] prompt-heavy chunked-256: throughput_tok_s 1.24e+03, ttft_p50_s 0.0325, itl_p99_ms 32.3, itl_max_ms 49.9
+[1/3] burst unchunked: decode_itl_p50_ms 6.52, decode_itl_p99_ms 63.9, decode_itl_max_ms 117, burst_ttft_p50_s 0.117, burst_ttft_max_s 0.181, drain_time_s 0.902
+[1/3] burst chunked-256: decode_itl_p50_ms 6.56, decode_itl_p99_ms 34.5, decode_itl_max_ms 39.5, burst_ttft_p50_s 0.193, burst_ttft_max_s 0.304, drain_time_s 0.949
+[2/3] default chunked-256: throughput_tok_s 2.21e+03, ttft_p50_s 0.555, itl_p99_ms 35.7, itl_max_ms 44
+[2/3] default unchunked: throughput_tok_s 2.23e+03, ttft_p50_s 0.449, itl_p99_ms 38.3, itl_max_ms 65.7
+[2/3] prompt-heavy chunked-256: throughput_tok_s 1.23e+03, ttft_p50_s 0.0309, itl_p99_ms 28.7, itl_max_ms 45.3
+[2/3] prompt-heavy unchunked: throughput_tok_s 1.25e+03, ttft_p50_s 0.0236, itl_p99_ms 36.6, itl_max_ms 68.4
+[2/3] burst chunked-256: decode_itl_p50_ms 5.27, decode_itl_p99_ms 37.7, decode_itl_max_ms 38.1, burst_ttft_p50_s 0.2, burst_ttft_max_s 0.305, drain_time_s 0.852
+[2/3] burst unchunked: decode_itl_p50_ms 8.33, decode_itl_p99_ms 65.8, decode_itl_max_ms 127, burst_ttft_p50_s 0.127, burst_ttft_max_s 0.192, drain_time_s 1.06
+[3/3] default unchunked: throughput_tok_s 2.34e+03, ttft_p50_s 0.538, itl_p99_ms 35.3, itl_max_ms 57
+[3/3] default chunked-256: throughput_tok_s 2.31e+03, ttft_p50_s 0.556, itl_p99_ms 30.7, itl_max_ms 33.8
+[3/3] prompt-heavy unchunked: throughput_tok_s 1.26e+03, ttft_p50_s 0.0222, itl_p99_ms 40.1, itl_max_ms 68.5
+[3/3] prompt-heavy chunked-256: throughput_tok_s 1.24e+03, ttft_p50_s 0.0347, itl_p99_ms 38, itl_max_ms 59.8
+[3/3] burst unchunked: decode_itl_p50_ms 6.71, decode_itl_p99_ms 61.7, decode_itl_max_ms 110, burst_ttft_p50_s 0.11, burst_ttft_max_s 0.172, drain_time_s 0.946
+[3/3] burst chunked-256: decode_itl_p50_ms 5.53, decode_itl_p99_ms 38.1, decode_itl_max_ms 38.7, burst_ttft_p50_s 0.194, burst_ttft_max_s 0.304, drain_time_s 0.891
+
+default (median of 3; change vs unchunked)
+            metric              unchunked            chunked-256
+  throughput_tok_s       2228.832   (+0%)       2206.540   (-1%)
+        ttft_p50_s          0.538   (+0%)          0.556   (+3%)
+        ttft_p95_s          1.802   (+0%)          1.865   (+3%)
+        itl_p50_ms          9.151   (+0%)          9.370   (+2%)
+        itl_p95_ms         26.738   (+0%)         25.410   (-5%)
+        itl_p99_ms         38.280   (+0%)         35.697   (-7%)
+        itl_max_ms         65.691   (+0%)         43.977  (-33%)
+       tpot_p50_ms         12.755   (+0%)         12.967   (+2%)
+   num_preemptions          0.000                  0.000        
+
+prompt-heavy (median of 3; change vs unchunked)
+            metric              unchunked            chunked-256
+  throughput_tok_s       1250.102   (+0%)       1237.985   (-1%)
+        ttft_p50_s          0.024   (+0%)          0.032  (+38%)
+        ttft_p95_s          0.070   (+0%)          0.091  (+30%)
+        itl_p50_ms          3.842   (+0%)          4.426  (+15%)
+        itl_p95_ms         15.060   (+0%)         21.810  (+45%)
+        itl_p99_ms         40.133   (+0%)         32.299  (-20%)
+        itl_max_ms         68.533   (+0%)         49.916  (-27%)
+       tpot_p50_ms          5.379   (+0%)          6.371  (+18%)
+   num_preemptions          0.000                  0.000        
+
+burst (median of 3; change vs unchunked)
+            metric              unchunked            chunked-256
+ decode_itl_p50_ms          6.712   (+0%)          5.526  (-18%)
+ decode_itl_p99_ms         63.910   (+0%)         37.741  (-41%)
+ decode_itl_max_ms        116.766   (+0%)         38.688  (-67%)
+  burst_ttft_p50_s          0.117   (+0%)          0.194  (+66%)
+  burst_ttft_max_s          0.181   (+0%)          0.304  (+68%)
+      drain_time_s          0.946   (+0%)          0.891   (-6%)
+wrote bench/results/chunked_prefill.json

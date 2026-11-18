@@ -1,0 +1,18 @@
+[1/3]  shared caching off:    318 tok/s | TTFT p50  0.028s p95  0.087s | latency p50  0.13s | prefill  38011 tok | hit   0%
+[1/3]  shared caching  on:    317 tok/s | TTFT p50  0.011s p95  0.034s | latency p50  0.10s | prefill   6923 tok | hit  82%
+[2/3]  shared caching  on:    318 tok/s | TTFT p50  0.010s p95  0.019s | latency p50  0.09s | prefill   6923 tok | hit  82%
+[2/3]  shared caching off:    317 tok/s | TTFT p50  0.029s p95  0.068s | latency p50  0.14s | prefill  38011 tok | hit   0%
+[3/3]  shared caching off:    317 tok/s | TTFT p50  0.033s p95  0.079s | latency p50  0.15s | prefill  38011 tok | hit   0%
+[3/3]  shared caching  on:    318 tok/s | TTFT p50  0.011s p95  0.021s | latency p50  0.09s | prefill   6923 tok | hit  82%
+
+shared workload, median of 3:
+            metric        off         on   change
+  throughput_tok_s    317.225    318.026      +0%
+        ttft_p50_s      0.029      0.011     -62%
+        ttft_p95_s      0.079      0.021     -74%
+     latency_p50_s      0.136      0.093     -32%
+     latency_p95_s      0.384      0.260     -32%
+    prefill_tokens  38011.000   6923.000     -82%
+          hit_rate      0.000      0.818         
+   mean_batch_size      2.145      1.671     -22%
+   num_preemptions      0.000      0.000         

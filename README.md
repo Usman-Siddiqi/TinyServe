@@ -80,6 +80,22 @@ The static batcher's sawtooth is the bus problem in one picture: the batch fills
 
 With contiguous slabs, a request that ends up 120 tokens long still pins 512 slots for its whole life, so the 8,192-slot pool holds only 16 requests and most of what is reserved is empty. With 16-token pages a request only ever wastes the unused tail of its last block.
 
+### Prefix caching, chunked prefill and smaller KV
+
+Three more upgrades target specific traffic shapes rather than raw throughput, so each has its own A/B benchmark (median of 3 interleaved repeats, same machine; raw output in `bench/results/`):
+
+| Upgrade | Workload | Result |
+|---|---|---|
+| Prefix caching (`--prefix-caching`, on by default with paging) | 120 chat requests sharing 4 system prompts | prefill tokens **-82%** (82% cache hit rate), p50 TTFT **29 ms to 11 ms**, p95 TTFT -74%, p50 latency -32% |
+| Chunked prefill, 256-token budget (`--chunked-prefill`) | burst of long prompts arriving while 16 requests decode | worst decode stall **117 ms to 39 ms**, p99 inter-token latency -41%; the burst's own TTFT is +66% |
+| Chunked prefill | default workload | throughput -1%, max inter-token gap -33% |
+| bfloat16 KV (`--kv-dtype bfloat16`, same 32 MiB) | default workload | 2x the token slots, 1.04x throughput, p50 TTFT 0.72 s to 0.51 s |
+| int8 KV (same 32 MiB) | default workload | 3.76x the token slots but 0.83x throughput: dequantizing in Python costs more than the memory saves when 32 seats already fit |
+
+- **Prefix caching is free when nothing is shared**, so it is on by default: throughput is unchanged and every hit is prefill skipped.
+- **Chunked prefill trades the newcomer's first token for everyone else's next one.** That is the right call for chat-style streaming, so it is a flag rather than the default.
+- **Smaller KV only pays when memory is the bottleneck.** Here the 32-request batch limit binds before the 8,192-slot pool does; on a GPU serving long contexts the extra slots turn directly into batch size.
+
 ### Scheduling for goodput
 
 Throughput is not what users feel. Production servers are judged on **goodput**: requests per second that meet a latency SLO, here a time to first token (TTFT) and a time per output token (TPOT) target. Once the shuttle is full, *who boards next* decides how many passengers arrive on time. The continuous scheduler takes a pluggable queue policy (`tinyserve/policy.py`):

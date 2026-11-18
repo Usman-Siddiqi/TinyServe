@@ -1,0 +1,13 @@
+[1] float32   slots   8192 |   2255 tok/s | p50 lat  1.67s | p95 lat  3.44s | p50 TTFT  0.754s | tpot  12.6ms | batch mean 27.3 max 32 | preempt 0
+[1] bfloat16  slots  16384 |   2339 tok/s | p50 lat  1.35s | p95 lat  3.14s | p50 TTFT  0.424s | tpot  12.1ms | batch mean 26.8 max 32 | preempt 0
+[1] int8      slots  30840 |   1850 tok/s | p50 lat  2.61s | p95 lat  4.88s | p50 TTFT  1.293s | tpot  15.8ms | batch mean 27.7 max 32 | preempt 0
+[2] float32   slots   8192 |   2250 tok/s | p50 lat  1.74s | p95 lat  3.55s | p50 TTFT  0.715s | tpot  13.1ms | batch mean 27.4 max 32 | preempt 0
+[2] bfloat16  slots  16384 |   2247 tok/s | p50 lat  1.74s | p95 lat  3.44s | p50 TTFT  0.817s | tpot  12.0ms | batch mean 26.9 max 32 | preempt 0
+[2] int8      slots  30840 |   1912 tok/s | p50 lat  2.41s | p95 lat  4.56s | p50 TTFT  1.197s | tpot  15.2ms | batch mean 27.4 max 32 | preempt 0
+[3] float32   slots   8192 |   2323 tok/s | p50 lat  1.44s | p95 lat  3.26s | p50 TTFT  0.516s | tpot  12.4ms | batch mean 27.2 max 32 | preempt 0
+[3] bfloat16  slots  16384 |   2351 tok/s | p50 lat  1.42s | p95 lat  3.16s | p50 TTFT  0.507s | tpot  12.1ms | batch mean 26.9 max 32 | preempt 0
+[3] int8      slots  30840 |   1883 tok/s | p50 lat  2.34s | p95 lat  4.67s | p50 TTFT  1.077s | tpot  15.5ms | batch mean 27.5 max 32 | preempt 0
+== medians
+float32     2255 tok/s (1.00x) | p50 lat  1.67s | p95 lat  3.44s | p50 TTFT  0.715s | mean batch 27.3
+bfloat16    2339 tok/s (1.04x) | p50 lat  1.42s | p95 lat  3.16s | p50 TTFT  0.507s | mean batch 26.9
+int8        1883 tok/s (0.83x) | p50 lat  2.41s | p95 lat  4.67s | p50 TTFT  1.197s | mean batch 27.5
