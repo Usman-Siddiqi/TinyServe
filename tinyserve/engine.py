@@ -26,6 +26,7 @@ from tinyserve.kv_cache import (
     PagedKVCache,
 )
 from tinyserve.model import ModelConfig, TinyGPT
+from tinyserve.policy import POLICIES, make_policy
 from tinyserve.request import Request, SamplingParams
 from tinyserve.runner import ModelRunner
 from tinyserve.scheduler import (
@@ -129,7 +130,7 @@ class Engine:
     def step(self) -> list[StepOutput]:
         """Run one iteration and return the tokens it produced."""
         start = self.clock()
-        plan = self.scheduler.schedule()
+        plan = self.scheduler.schedule(start)
         if plan.is_empty:
             return []
 
@@ -206,6 +207,10 @@ class EngineConfig:
             ``"paged"`` (fixed-size blocks on demand). Paged needs preemption to
             handle running out of memory, so only ``continuous`` supports it.
         block_size: tokens per block for the paged layout.
+        queue_policy: admission order of the continuous scheduler, one of
+            :data:`~tinyserve.policy.POLICIES`.
+        ttft_slo_s: TTFT target used by the deadline-aware policies.
+        sjf_aging: tokens of priority a waiting request gains per second (``sjf``).
         num_threads: PyTorch intra-op threads (None leaves the default).
     """
 
@@ -216,6 +221,9 @@ class EngineConfig:
     max_tokens_per_step: int = 2048
     kv_layout: str = "contiguous"
     block_size: int = 16
+    queue_policy: str = "fcfs"
+    ttft_slo_s: float = 1.0
+    sjf_aging: float = 100.0
     num_threads: int | None = None
 
 
@@ -225,6 +233,10 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError(f"unknown strategy {cfg.strategy!r}; choose from {STRATEGIES}")
     if cfg.kv_layout not in KV_LAYOUTS:
         raise ValueError(f"unknown kv_layout {cfg.kv_layout!r}; choose from {KV_LAYOUTS}")
+    if cfg.queue_policy not in POLICIES:
+        raise ValueError(f"unknown queue_policy {cfg.queue_policy!r}; choose from {POLICIES}")
+    if cfg.queue_policy != "fcfs" and cfg.strategy != "continuous":
+        raise ValueError("queue policies other than 'fcfs' need the 'continuous' strategy")
     if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
     if cfg.kv_capacity_tokens < cfg.model.max_seq_len:
@@ -245,5 +257,6 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     elif cfg.strategy == "static":
         scheduler = StaticScheduler(kv, cfg.max_batch_size)
     else:
-        scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step)
+        policy = make_policy(cfg.queue_policy, cfg.ttft_slo_s, cfg.sjf_aging)
+        scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step, policy)
     return Engine(model, scheduler, record_trace=record_trace)

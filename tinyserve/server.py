@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from tinyserve.async_engine import AsyncEngine
 from tinyserve.engine import KV_LAYOUTS, STRATEGIES, EngineConfig, StepOutput, build_engine
+from tinyserve.policy import POLICIES
 from tinyserve.request import SamplingParams
 from tinyserve.tokenizer import CharTokenizer
 
@@ -144,6 +145,8 @@ def main() -> None:
     parser.add_argument("--max-batch-size", type=int, default=32)
     parser.add_argument("--kv-capacity-tokens", type=int, default=8192)
     parser.add_argument("--block-size", type=int, default=16)
+    parser.add_argument("--queue-policy", choices=POLICIES, default="fcfs")
+    parser.add_argument("--ttft-slo", type=float, default=1.0, help="seconds, for edf policies")
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
@@ -155,6 +158,8 @@ def main() -> None:
         max_batch_size=args.max_batch_size,
         kv_layout=args.kv_layout,
         block_size=args.block_size,
+        queue_policy=args.queue_policy if args.strategy == "continuous" else "fcfs",
+        ttft_slo_s=args.ttft_slo,
         num_threads=args.threads,
     )
     uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
