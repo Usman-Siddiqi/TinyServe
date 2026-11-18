@@ -98,7 +98,8 @@ class KVBatch:
     def write(self, layer: int, k: Tensor, v: Tensor) -> None:
         """Store the new ``(B, S, H, D)`` keys/values at their slots."""
         for pool, new in ((self.pool.k[layer], k), (self.pool.v[layer], v)):
-            pool.index_copy_(0, self.write_slots, new.flatten(0, 1)[self.write_rows])
+            rows = new.flatten(0, 1).index_select(0, self.write_rows)
+            pool.index_copy_(0, self.write_slots, rows)
 
     def read(self, layer: int, read_slots: Tensor) -> tuple[Tensor, Tensor]:
         """Gather keys/values at ``read_slots`` ``(G, L)`` into dense ``(G, L, H, D)`` tensors."""
