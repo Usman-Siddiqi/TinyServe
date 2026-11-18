@@ -99,6 +99,37 @@ def test_paged_addresses_follow_block_table() -> None:
     assert addrs == [b0 * 4 + i for i in range(4)] + [b2 * 4 + i for i in range(4)]
 
 
+def test_contiguous_addresses_are_slab_offsets() -> None:
+    kv = ContiguousKVCache(pool(3 * M.max_seq_len), M.max_seq_len)
+    kv.allocate(7, 4)
+    kv.allocate(8, 4)
+    pos = torch.tensor([[0, 3], [5, 127]])
+    assert kv.addresses([8, 7], pos).tolist() == [[128, 131], [5, 127]]
+
+
+def test_kv_batch_writes_real_tokens_and_reads_them_back() -> None:
+    kv = PagedKVCache(pool(64), block_size=4, watermark=0)
+    kv.allocate(0, 6)
+    kv.allocate(1, 3)
+    valid = torch.tensor([[True] * 6, [True] * 3 + [False] * 3])
+    positions = torch.arange(6).expand(2, -1) * valid
+    batch = kv.build_batch([0, 1], positions, valid)
+    k = torch.randn(2, 6, M.n_kv_heads, M.head_dim)
+    batch.write(0, k, -k)
+
+    assert batch.write_slots.tolist() == kv.addresses([0, 1], positions)[valid].tolist()
+    torch.testing.assert_close(kv.pool.k[0][batch.write_slots], k[valid], atol=0, rtol=0)
+    (group,) = batch.groups
+    keys, values = batch.read(0, group.read_slots)
+    for i, row in enumerate(group.rows.tolist()):
+        n = int(valid[row].sum())
+        torch.testing.assert_close(keys[i, :n], k[row, :n], atol=0, rtol=0)
+        torch.testing.assert_close(values[i, :n], -k[row, :n], atol=0, rtol=0)
+    # Each query sees exactly the keys at or before its own position.
+    assert group.mask.shape == (2, 1, 6, 6)
+    assert torch.equal(group.mask[0, 0], torch.ones(6, 6, dtype=torch.bool).tril())
+
+
 def test_paged_wastes_far_less_than_contiguous() -> None:
     """Same sequences: contiguous pins max_seq_len each; paged only rounds up to a block."""
     lengths = [10, 37, 64, 5]
