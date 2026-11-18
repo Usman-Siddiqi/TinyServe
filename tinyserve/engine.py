@@ -24,6 +24,7 @@ from tinyserve.kv_cache import (
     KVPool,
     KVUsage,
     PagedKVCache,
+    PrefixCachingKVCache,
 )
 from tinyserve.kv_quant import KV_DTYPES, calibrate_key_smoothing
 from tinyserve.model import ModelConfig, TinyGPT
@@ -207,6 +208,8 @@ class EngineConfig:
             ``"paged"`` (fixed-size blocks on demand). Paged needs preemption to
             handle running out of memory, so only ``continuous`` supports it.
         block_size: tokens per block for the paged layout.
+        enable_prefix_caching: share the KV of common prompt prefixes between
+            requests (paged layout only).
         num_threads: PyTorch intra-op threads (None leaves the default).
         kv_dtype: KV storage format, one of :data:`~tinyserve.kv_quant.KV_DTYPES`.
         kv_memory_bytes: if set, size the pool by bytes instead of
@@ -221,6 +224,7 @@ class EngineConfig:
     max_tokens_per_step: int = 2048
     kv_layout: str = "contiguous"
     block_size: int = 16
+    enable_prefix_caching: bool = False
     num_threads: int | None = None
     kv_dtype: str = "float32"
     kv_memory_bytes: int | None = None
@@ -256,6 +260,8 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
     if cfg.kv_dtype not in KV_DTYPES:
         raise ValueError(f"unknown kv_dtype {cfg.kv_dtype!r}; choose from {KV_DTYPES}")
+    if cfg.enable_prefix_caching and cfg.kv_layout != "paged":
+        raise ValueError("prefix caching needs the paged KV cache")
     if cfg.num_kv_slots < cfg.model.max_seq_len:
         raise ValueError("the KV pool must hold at least one max_seq_len sequence")
     if cfg.num_threads is not None:
@@ -266,7 +272,9 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     if pool.format.quantized and cfg.kv_smooth_keys:
         calibrate_kv(model, pool)
     kv: KVCacheManager
-    if cfg.kv_layout == "paged":
+    if cfg.enable_prefix_caching:
+        kv = PrefixCachingKVCache(pool, cfg.block_size)
+    elif cfg.kv_layout == "paged":
         kv = PagedKVCache(pool, cfg.block_size)
     else:
         kv = ContiguousKVCache(pool, m.max_seq_len)

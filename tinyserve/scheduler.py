@@ -100,6 +100,9 @@ class Scheduler(ABC):
 
     def finish_step(self) -> list[Request]:
         """Release memory and seats of requests that finished this step. Returns them."""
+        if self.kv.prefix_caching:
+            for req in self.running:
+                self.kv.cache_blocks(req.request_id, req.all_ids[: req.num_computed_tokens])
         done = [r for r in self.running if r.is_finished]
         for req in done:
             self._release(req)
@@ -122,11 +125,17 @@ class Scheduler(ABC):
     # --- helpers for subclasses ----------------------------------------------------
 
     def _admit(self, request: Request) -> bool:
-        """Move the head of the waiting queue into the batch, if its KV memory fits."""
-        if not self.kv.allocate(request.request_id, request.length):
+        """Move the head of the waiting queue into the batch, if its KV memory fits.
+
+        With prefix caching, the request's cached prefix is skipped by prefill.
+        """
+        token_ids = request.all_ids
+        num_cached = self.kv.match_prefix(token_ids)
+        if not self.kv.allocate(request.request_id, request.length, token_ids):
             return False
         assert self.waiting[0] is request, "requests are admitted in FIFO order"
         self.waiting.popleft()
+        request.num_computed_tokens = request.num_cached_tokens = num_cached
         request.status = RequestStatus.RUNNING
         self.running.append(request)
         self.slot_of[request.request_id] = self._free_slots.pop()
@@ -249,10 +258,11 @@ class ContinuousScheduler(Scheduler):
         budget = self.max_tokens_per_step - len(out.decode)
         while self.waiting and len(self.running) < self.max_batch_size:
             req = self.waiting[0]
-            if req.length > budget or not self._admit(req):
+            cost = req.length - self.kv.match_prefix(req.all_ids)  # cached tokens are free
+            if cost > budget or not self._admit(req):
                 break
             out.prefill.append(req)
-            budget -= req.length
+            budget -= cost
         return out
 
     def _preempt(self, request: Request) -> None:

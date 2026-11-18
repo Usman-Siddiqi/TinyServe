@@ -52,6 +52,7 @@ def _summary(out: StepOutput, text: str) -> dict[str, Any]:
         "text": text,
         "finish_reason": req.finish_reason.value if req.finish_reason else None,
         "num_prompt_tokens": len(req.prompt_ids),
+        "num_cached_tokens": req.num_cached_tokens,
         "num_generated_tokens": len(req.output_ids),
         "ttft_ms": round(req.ttft * 1000, 2) if req.ttft is not None else None,
         "latency_ms": round(req.latency * 1000, 2) if req.latency is not None else None,
@@ -61,7 +62,9 @@ def _summary(out: StepOutput, text: str) -> dict[str, Any]:
 
 def create_app(config: EngineConfig | None = None) -> FastAPI:
     """Build the FastAPI app around an engine described by ``config``."""
-    config = config or EngineConfig(strategy="continuous", kv_layout="paged")
+    config = config or EngineConfig(
+        strategy="continuous", kv_layout="paged", enable_prefix_caching=True
+    )
     tokenizer = CharTokenizer()
     async_engine = AsyncEngine(build_engine(config))
 
@@ -122,7 +125,7 @@ def create_app(config: EngineConfig | None = None) -> FastAPI:
 
     @app.get("/stats")
     async def stats() -> dict[str, Any]:
-        """Queue depth, batch size, KV memory utilization and recent tokens/sec."""
+        """Queue depth, batch size, KV memory, prefix-cache hit rate and recent tokens/sec."""
         return async_engine.stats()
 
     @app.get("/health")
@@ -152,10 +155,18 @@ def main() -> None:
         default=None,
         help="size the KV pool in MiB instead of tokens (smaller dtypes then fit more)",
     )
+    parser.add_argument(
+        "--prefix-caching",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="share KV blocks of common prompt prefixes (paged layout only)",
+    )
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
         args.kv_layout = "contiguous"  # paged needs preemption, which only continuous has
+    if args.kv_layout != "paged":
+        args.prefix_caching = False
 
     config = EngineConfig(
         strategy=args.strategy,
@@ -163,6 +174,7 @@ def main() -> None:
         max_batch_size=args.max_batch_size,
         kv_layout=args.kv_layout,
         block_size=args.block_size,
+        enable_prefix_caching=args.prefix_caching,
         num_threads=args.threads,
         kv_dtype=args.kv_dtype,
         kv_memory_bytes=None if args.kv_memory_mib is None else int(args.kv_memory_mib * 2**20),

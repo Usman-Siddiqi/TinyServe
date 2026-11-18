@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import asdict, dataclass
+from typing import Any
 
 # Printable characters used to build random prompts (the model does not care what they say).
 _ALPHABET = "abcdefghijklmnopqrstuvwxyz      ,.ETAOINSHRDLU"
@@ -36,6 +37,10 @@ class WorkloadSpec:
     Output lengths follow a clipped log-normal distribution: most answers are
     short, a few are very long. That long tail is exactly what hurts static
     batching, where everyone waits for the longest request in the batch.
+
+    With ``num_system_prompts > 0``, every prompt starts with one of that many
+    shared "system prompts" (picked uniformly) followed by a unique user part of
+    ``min_prompt_len..max_prompt_len`` characters, like a chat service would see.
     """
 
     num_requests: int = 200
@@ -47,18 +52,46 @@ class WorkloadSpec:
     output_len_sigma: float = 0.8
     min_output_len: int = 8
     max_output_len: int = 300
+    num_system_prompts: int = 0
+    min_system_prompt_len: int = 200
+    max_system_prompt_len: int = 350
+
+    @classmethod
+    def shared_prefix(cls, num_system_prompts: int = 4, **overrides: Any) -> WorkloadSpec:
+        """A chat-like workload: shared system prompts, short user turns and answers.
+
+        Lengths are chosen so prompt + output always fits a 512-token context.
+        """
+        params: dict[str, Any] = {
+            "num_system_prompts": num_system_prompts,
+            "min_prompt_len": 16,
+            "max_prompt_len": 64,
+            "median_output_len": 32,
+            "max_output_len": 96,
+        }
+        return cls(**(params | overrides))
 
 
 def make_workload(spec: WorkloadSpec) -> list[WorkloadItem]:
     """Generate a reproducible list of requests sorted by arrival time."""
     rng = random.Random(spec.seed)
+    system_prompts = [
+        _random_text(rng, rng.randint(spec.min_system_prompt_len, spec.max_system_prompt_len))
+        for _ in range(spec.num_system_prompts)
+    ]
     t = 0.0
     items = []
     for _ in range(spec.num_requests):
         t += rng.expovariate(spec.rate)  # exponential gaps = Poisson arrivals
         prompt_len = rng.randint(spec.min_prompt_len, spec.max_prompt_len)
-        prompt = "".join(rng.choice(_ALPHABET) for _ in range(prompt_len))
+        prompt = _random_text(rng, prompt_len)
+        if system_prompts:
+            prompt = rng.choice(system_prompts) + prompt
         out = rng.lognormvariate(math.log(spec.median_output_len), spec.output_len_sigma)
         max_tokens = int(min(max(out, spec.min_output_len), spec.max_output_len))
         items.append(WorkloadItem(arrival=t, prompt=prompt, max_tokens=max_tokens))
     return items
+
+
+def _random_text(rng: random.Random, length: int) -> str:
+    return "".join(rng.choice(_ALPHABET) for _ in range(length))

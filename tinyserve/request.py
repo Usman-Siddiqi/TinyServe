@@ -79,6 +79,8 @@ class Request:
     # How many tokens of ``all_ids`` already have their KV in the cache. A prefill
     # may process the sequence in several chunks, resuming from here.
     num_computed_tokens: int = 0
+    # Tokens whose KV came from the prefix cache at the latest admission.
+    num_cached_tokens: int = 0
     _generator: torch.Generator | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:

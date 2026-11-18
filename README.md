@@ -4,7 +4,7 @@
 
 **A tiny LLM inference engine, built from scratch to show how production model serving actually works.**
 
-Continuous batching · paged KV cache · request scheduling · token streaming. In under 2,000 lines of Python.
+Continuous batching · paged KV cache · prefix caching · request scheduling · token streaming.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -104,13 +104,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,bench]"
 
-pytest                      # 41 tests, a few seconds
+pytest                      # 63 tests, a few seconds
 ```
 
-**Run the server** (continuous batching with a paged KV cache by default):
+**Run the server** (continuous batching with a paged, prefix-caching KV cache by default):
 
 ```bash
 tinyserve-server --port 8000
+# or: tinyserve-server --no-prefix-caching
 # or: tinyserve-server --strategy static --max-batch-size 16
 ```
 
@@ -159,10 +160,14 @@ curl -s localhost:8000/stats
 }
 ```
 
+With prefix caching on, `/stats` also reports `prefix_cache_hit_rate`, the hit and query token counts, evicted blocks and `kv_cached_tokens` (free slots still holding reusable KV), and each request's summary event includes `num_cached_tokens`.
+
 **Load test it** with the async load generator (Poisson arrivals, streams every response):
 
 ```bash
 tinyserve-loadgen --url http://127.0.0.1:8000 --num-requests 100 --rate 10
+# chat-like traffic: every prompt starts with one of 4 shared system prompts
+tinyserve-loadgen --url http://127.0.0.1:8000 --num-requests 100 --rate 5 --system-prompts 4
 ```
 
 **Reproduce the benchmark and charts** (about 4 minutes on a 4-core machine):
@@ -171,6 +176,7 @@ tinyserve-loadgen --url http://127.0.0.1:8000 --num-requests 100 --rate 10
 python bench/run.py          # writes bench/results/results.json (raw, per request)
 python bench/plot.py         # renders docs/assets/*.png and bench/results/results.md
 python docs/make_visuals.py  # renders the two GIFs from real engine traces
+python bench/prefix_caching.py  # prefix caching off vs. on, shared-prefix and default workloads
 ```
 
 ## Project structure
@@ -179,7 +185,7 @@ python docs/make_visuals.py  # renders the two GIFs from real engine traces
 tinyserve/
   model.py         TinyGPT: decoder-only transformer whose attention reads an external KV cache
   tokenizer.py     printable-ASCII character tokenizer
-  kv_cache.py      KV pool, contiguous and paged cache managers, block allocator
+  kv_cache.py      KV pool, contiguous, paged and prefix-caching managers, block allocators
   kv_quant.py      KV storage formats: float32, bfloat16, int8 with per-token scales
   request.py       requests, sampling params, per-request timing metrics
   sampler.py       greedy / temperature sampling with per-request RNGs
@@ -192,6 +198,7 @@ tinyserve/
   loadgen.py       async HTTP load generator
 bench/
   run.py           benchmark all strategies, save raw JSON
+  prefix_caching.py  A/B benchmark of prefix caching (shared-prefix and default workloads)
   plot.py          charts + results table from that JSON
   results/         the raw results behind every number in this README
 docs/
@@ -233,6 +240,8 @@ The pool is plain storage, per layer a `(num_slots, n_kv_heads, head_dim)` tenso
 
 `BlockAllocator` is a free list of block ids. Because every block has the same size there is no external fragmentation and nothing to compact, and a freed block is immediately reusable by anyone. Each sequence keeps a block table mapping logical blocks to physical ones, which can be scattered anywhere in the pool. `KVUsage` reports used slots (holding a real token), reserved slots (handed out) and capacity, so utilization is `used / reserved`.
 
+**Prefix caching** (`PrefixCachingKVCache`, vLLM-style). Each full block is identified by a hash chained over its parent block's hash and its own token ids, so equal hashes mean equal prefixes and therefore equal KV. On admission the scheduler looks up the longest run of cached blocks at the start of the request, shares them (reference counted in `CachingBlockAllocator`) and sets `num_computed_tokens` so prefill skips them; the last token is always computed so the request can sample. Only full blocks are shared and nobody writes to a full block again, so there is no copy-on-write. When a sequence finishes, its cached blocks keep their KV as evictable free space and are reclaimed least-recently-used first, only when no clean block is left. Requests sharing a system prompt skip most of their prefill, a follow-up chat turn reuses the previous turn's KV, and a preempted request usually finds its own blocks again on readmission.
+
 Attention gathers each sequence's keys and values through those addresses into a dense tensor. Rows are sorted by length and attended in groups of 8 so a 20-token sequence is not padded out to a 450-token one in the same batch.
 
 ### Server (`async_engine.py`, `server.py`)
@@ -253,7 +262,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 
 ## Roadmap
 
-- [ ] **Prefix caching**: share KV blocks between requests with a common prompt prefix (block hashing plus reference counts in the allocator).
+- [x] **Prefix caching**: share KV blocks between requests with a common prompt prefix (block hashing plus reference counts in the allocator).
 - [ ] **Speculative decoding**: a smaller draft model proposes several tokens and the main model verifies them in one pass.
 - [ ] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor.
 - [ ] **Preemption by swapping**: move a victim's blocks to a CPU-side pool instead of recomputing them.
