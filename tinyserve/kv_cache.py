@@ -28,8 +28,10 @@ full blocks are shared between sequences that start with the same tokens.
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 from abc import ABC, abstractmethod
+from array import array
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -472,6 +474,20 @@ class BlockAllocator:
         return iter(self._free)
 
 
+BlockHash = bytes
+
+
+def block_hash(parent: BlockHash | None, token_ids: Sequence[int]) -> BlockHash:
+    """SHA-256 of a full block chained over its parent's, so it identifies the whole prefix.
+
+    A cryptographic hash makes an accidental collision (which would silently reuse
+    the wrong KV) practically impossible.
+    """
+    h = hashlib.sha256(parent or b"")
+    h.update(array("q", token_ids).tobytes())
+    return h.digest()
+
+
 class CachingBlockAllocator(BlockAllocator):
     """A block allocator with reference counts and a content-addressed block cache.
 
@@ -487,8 +503,8 @@ class CachingBlockAllocator(BlockAllocator):
         self.num_shared_refs = 0  # sum over blocks of (owners - 1)
         self.num_evictions = 0
         self._evictable: OrderedDict[int, None] = OrderedDict()  # least recently freed first
-        self._hash_of: dict[int, int] = {}
-        self._block_of: dict[int, int] = {}
+        self._hash_of: dict[int, BlockHash] = {}
+        self._block_of: dict[BlockHash, int] = {}
 
     @property
     def num_free(self) -> int:
@@ -530,7 +546,7 @@ class CachingBlockAllocator(BlockAllocator):
         """Iterate over the free block ids, clean ones first."""
         return itertools.chain(self._free, self._evictable)
 
-    def lookup(self, block_hash: int) -> int | None:
+    def lookup(self, block_hash: BlockHash) -> int | None:
         """The cached block holding the content identified by ``block_hash``, if any."""
         return self._block_of.get(block_hash)
 
@@ -542,16 +558,11 @@ class CachingBlockAllocator(BlockAllocator):
             self.num_shared_refs += 1
         self.ref_counts[block] += 1
 
-    def register(self, block: int, block_hash: int) -> None:
+    def register(self, block: int, block_hash: BlockHash) -> None:
         """Make ``block`` findable by ``block_hash``. The first block with a hash wins."""
         if block_hash not in self._block_of and block not in self._hash_of:
             self._hash_of[block] = block_hash
             self._block_of[block_hash] = block
-
-
-def block_hash(parent: int | None, token_ids: Sequence[int]) -> int:
-    """Hash of a full block, chained over its parent's so it identifies the whole prefix."""
-    return hash((parent, tuple(token_ids)))
 
 
 class PagedKVCache(KVCacheManager):
@@ -619,8 +630,8 @@ class PrefixCachingKVCache(PagedKVCache):
     """A paged KV cache that shares full blocks between sequences with a common prefix.
 
     Each full block is identified by :func:`block_hash`, chained over the blocks
-    before it, so equal hashes mean equal prefixes (barring a 64-bit hash
-    collision) and therefore equal KV. A new
+    before it, so equal hashes mean equal prefixes and therefore
+    equal KV. A new
     sequence reuses the longest run of cached blocks at its start and only
     prefills the rest. Full blocks are never written again, so sharing them needs
     no copy-on-write; a sequence's partial last block is always private.
@@ -634,7 +645,9 @@ class PrefixCachingKVCache(PagedKVCache):
     def __init__(self, pool: KVPool, block_size: int = 16, watermark: float = 0.01) -> None:
         super().__init__(pool, block_size, watermark)
         self.allocator: CachingBlockAllocator = CachingBlockAllocator(self.allocator.num_blocks)
-        self._block_hashes: dict[int, list[int]] = {}  # hashes of each sequence's cached blocks
+        self._block_hashes: dict[
+            int, list[BlockHash]
+        ] = {}  # hashes of each sequence's cached blocks
         self._stats = PrefixCacheStats()
 
     def _match(self, token_ids: Sequence[int]) -> tuple[list[int], list[int]]:
@@ -644,7 +657,7 @@ class PrefixCachingKVCache(PagedKVCache):
         logits for the next token.
         """
         blocks: list[int] = []
-        hashes: list[int] = []
+        hashes: list[BlockHash] = []
         parent = None
         bs = self.block_size
         for i in range((len(token_ids) - 1) // bs):
