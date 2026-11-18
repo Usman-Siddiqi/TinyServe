@@ -1,0 +1,10 @@
+sampled and scored 32,768 tokens in 309 s
+step     0  loss 351.5133  1 s
+step   200  loss 52.4133  87 s
+step   400  loss 27.2129  142 s
+step   600  loss 21.7003  206 s
+step   799  loss 19.9979  248 s
+distilled (1 layer, d=128)       greedy 0.826  T=0.2 0.831  T=0.3 0.841  T=0.5 0.884  T=1.0 0.938
+early exit (target layer 1)      greedy 0.683  T=0.2 0.515  T=0.3 0.428  T=0.5 0.548  T=1.0 0.800
+early exit (target layers 1-2)   greedy 0.684  T=0.2 0.600  T=0.3 0.597  T=0.5 0.709  T=1.0 0.854
+saved /home/user/TinyServe/.claude/worktrees/agent-ab44876e36eb4abdb/tinyserve/assets/draft_distilled.pt (1.02 MB)

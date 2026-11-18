@@ -42,6 +42,9 @@ tinyserve-loadgen = "tinyserve.loadgen:main"
 [tool.setuptools.packages.find]
 include = ["tinyserve*"]
 
+[tool.setuptools.package-data]
+tinyserve = ["assets/*.pt"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

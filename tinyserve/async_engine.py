@@ -169,5 +169,9 @@ class AsyncEngine:
             "num_finished_requests": self._num_finished,
             "num_preemptions": sched.num_preemptions,
         }
+        if self.engine.speculator is not None:
+            spec = self.engine.speculator.stats
+            snap["spec_acceptance_rate"] = round(spec.acceptance_rate, 4)
+            snap["spec_tokens_per_verification"] = round(spec.tokens_per_verification, 4)
         with self._lock:
             self._snapshot = snap

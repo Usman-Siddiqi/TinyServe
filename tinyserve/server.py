@@ -24,7 +24,14 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from tinyserve.async_engine import AsyncEngine
-from tinyserve.engine import KV_LAYOUTS, STRATEGIES, EngineConfig, StepOutput, build_engine
+from tinyserve.engine import (
+    KV_LAYOUTS,
+    SPEC_METHODS,
+    STRATEGIES,
+    EngineConfig,
+    StepOutput,
+    build_engine,
+)
 from tinyserve.request import SamplingParams
 from tinyserve.tokenizer import CharTokenizer
 
@@ -145,6 +152,10 @@ def main() -> None:
     parser.add_argument("--kv-capacity-tokens", type=int, default=8192)
     parser.add_argument("--block-size", type=int, default=16)
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
+    parser.add_argument(
+        "--speculative", choices=SPEC_METHODS, default=None, help="speculative decoding draft"
+    )
+    parser.add_argument("--num-speculative-tokens", type=int, default=4)
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
         args.kv_layout = "contiguous"  # paged needs preemption, which only continuous has
@@ -156,6 +167,8 @@ def main() -> None:
         kv_layout=args.kv_layout,
         block_size=args.block_size,
         num_threads=args.threads,
+        speculative=args.speculative,
+        num_speculative_tokens=args.num_speculative_tokens,
     )
     uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
 

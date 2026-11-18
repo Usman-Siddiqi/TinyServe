@@ -80,6 +80,16 @@ class Scheduler(ABC):
         self.slot_of: dict[int, int] = {}
         self._free_slots = list(range(max_batch_size - 1, -1, -1))
         self.num_preemptions = 0
+        # Extra KV slots a decode step may write per request (speculative drafts).
+        self.num_lookahead_tokens = 0
+
+    def num_lookahead(self, request: Request) -> int:
+        """Draft tokens ``request`` may verify in its next decode step."""
+        return max(0, min(self.num_lookahead_tokens, request.num_remaining_tokens - 1))
+
+    def decode_len(self, request: Request) -> int:
+        """KV slots ``request`` needs for its next decode step."""
+        return request.length + self.num_lookahead(request)
 
     def validate(self, request: Request) -> None:  # noqa: B027 - optional hook
         """Raise ``ValueError`` if this scheduler could never run ``request``."""
@@ -141,7 +151,7 @@ class Scheduler(ABC):
 
     def _grow_or_fail(self, request: Request) -> None:
         """Reserve KV room for the token a decode step is about to write."""
-        if not self.kv.grow(request.request_id, request.length):
+        if not self.kv.grow(request.request_id, self.decode_len(request)):
             raise RuntimeError(
                 f"{self.name} scheduler ran out of KV memory; it does not support preemption"
             )
@@ -236,7 +246,7 @@ class ContinuousScheduler(Scheduler):
         i = 0
         while i < len(self.running):
             req = self.running[i]
-            if self.kv.grow(req.request_id, req.length):
+            if self.kv.grow(req.request_id, self.decode_len(req)):
                 out.decode.append(req)
                 i += 1
                 continue
@@ -246,7 +256,7 @@ class ContinuousScheduler(Scheduler):
             # If the victim was `req` itself the loop ends; otherwise retry `req`.
 
         # 2. Admit new requests (FCFS) into free seats while budget and memory allow.
-        budget = self.max_tokens_per_step - len(out.decode)
+        budget = self.max_tokens_per_step - sum(1 + self.num_lookahead(r) for r in out.decode)
         while self.waiting and len(self.running) < self.max_batch_size:
             req = self.waiting[0]
             if req.length > budget or not self._admit(req):
