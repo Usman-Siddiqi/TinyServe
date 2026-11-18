@@ -4,7 +4,7 @@
 
 **A tiny LLM inference engine, built from scratch to show how production model serving actually works.**
 
-Continuous batching · paged KV cache · request scheduling · token streaming. In under 2,000 lines of heavily commented Python.
+Continuous batching · paged KV cache · request scheduling · token streaming. In under 2,000 lines of Python.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
