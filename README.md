@@ -86,7 +86,7 @@ Three more upgrades target specific traffic shapes rather than raw throughput, s
 
 | Upgrade | Workload | Result |
 |---|---|---|
-| Prefix caching (`--prefix-caching`, on by default with paging) | 120 chat requests sharing 4 system prompts | prefill tokens **-82%** (82% cache hit rate), p50 TTFT **29 ms to 11 ms**, p95 TTFT -74%, p50 latency -32% |
+| Prefix caching (on by default in the server) | 120 chat requests sharing 4 system prompts | prefill tokens **-82%** (82% cache hit rate), p50 TTFT **29 ms to 11 ms**, p95 TTFT -74%, p50 latency -32% |
 | Chunked prefill, 256-token budget (`--chunked-prefill`) | burst of long prompts arriving while 16 requests decode | worst decode stall **117 ms to 39 ms**, p99 inter-token latency -41%; the burst's own TTFT is +66% |
 | Chunked prefill | default workload | throughput -1%, max inter-token gap -33% |
 | bfloat16 KV (`--kv-dtype bfloat16`, same 32 MiB) | default workload | 2x the token slots, 1.04x throughput, p50 TTFT 0.72 s to 0.51 s |
