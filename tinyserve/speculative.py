@@ -260,25 +260,106 @@ class SpecStats:
         return [a / d for a, d in zip(self.accepted_at, self.drafted_at, strict=False) if d]
 
 
+class DraftLengthController:
+    """Picks the draft length for each decode batch from recent acceptance rates.
+
+    With per-token acceptance rate ``a`` and ``k`` drafts, a request gains
+    ``(1 - a^(k+1)) / (1 - a)`` tokens per step on average (Leviathan et al., 2023),
+    while the step costs about ``1 + c*k`` plain decode steps. Verification pads
+    every request to the longest draft, so one ``k`` is chosen per batch: the one
+    with the most expected tokens per unit cost. When drafts keep failing it
+    picks 0 and the step is an ordinary decode.
+
+    ``c = draft_cost + verify_cost * (1 + batch_size / 4)``: verifying extra
+    tokens gets pricier as the batch grows, because CPU decoding is close to
+    compute-bound. The defaults are rough fits from ``bench/spec_costs.py``.
+
+    Args:
+        draft_cost: cost of drafting one token, relative to a plain decode step.
+        verify_cost: extra cost of verifying one more token per request.
+        decay: weight of older verifications in each acceptance estimate.
+        probe_every: after this many steps without drafting, draft one token to
+            re-check acceptance.
+    """
+
+    def __init__(
+        self,
+        draft_cost: float,
+        verify_cost: float = 0.12,
+        decay: float = 0.8,
+        probe_every: int = 8,
+    ) -> None:
+        self.draft_cost = draft_cost
+        self.verify_cost = verify_cost
+        self.decay = decay
+        self.probe_every = probe_every
+        self._counts: dict[int, tuple[float, float]] = {}  # request_id -> (accepted, rejected)
+        self._idle_steps = 0
+
+    def acceptance(self, request_id: int) -> float:
+        """Estimated per-token acceptance rate (a prior of 2/3 for new requests)."""
+        accepted, rejected = self._counts.get(request_id, (2.0, 1.0))
+        return accepted / (accepted + rejected)
+
+    def choose(self, requests: list[Request], limits: list[int]) -> list[int]:
+        """Draft lengths for a decode batch, each capped by ``limits[i]``."""
+        rates = [self.acceptance(r.request_id) for r in requests]
+        c = self.draft_cost + self.verify_cost * (1 + len(requests) / 4)
+        best_k, best = 0, float(len(requests))
+        for k in range(1, max(limits, default=0) + 1):
+            expected = sum(
+                sum(a**i for i in range(min(k, n) + 1)) for a, n in zip(rates, limits, strict=True)
+            )
+            if expected / (1 + c * k) > best:
+                best_k, best = k, expected / (1 + c * k)
+        if best_k == 0:
+            self._idle_steps += 1
+            if self._idle_steps >= self.probe_every:
+                self._idle_steps, best_k = 0, 1
+        return [min(best_k, n) for n in limits]
+
+    def update(self, request_id: int, drafted: int, accepted: int) -> None:
+        """Fold one verification into the request's acceptance estimate."""
+        if drafted:
+            acc, rej = self._counts.get(request_id, (2.0, 1.0))
+            self._counts[request_id] = (
+                self.decay * acc + accepted,
+                self.decay * rej + (accepted < drafted),
+            )
+
+    def release(self, request_id: int) -> None:
+        """Forget a finished request."""
+        self._counts.pop(request_id, None)
+
+
 class SpeculativeDecoder:
     """Replaces the plain decode step with draft, verify, accept.
 
     Args:
         proposer: where the drafts come from.
-        num_speculative_tokens: drafts per request per step (``k``).
+        num_speculative_tokens: most drafts per request per step (``k``).
+        controller: adapts each request's draft length; ``None`` always drafts ``k``.
     """
 
-    def __init__(self, proposer: Proposer, num_speculative_tokens: int = 4) -> None:
+    def __init__(
+        self,
+        proposer: Proposer,
+        num_speculative_tokens: int = 4,
+        controller: DraftLengthController | None = None,
+    ) -> None:
         if num_speculative_tokens < 1:
             raise ValueError("num_speculative_tokens must be >= 1")
         self.proposer = proposer
         self.num_speculative_tokens = num_speculative_tokens
+        self.controller = controller
         self.stats = SpecStats()
 
     def decode(
         self, runner: ModelRunner, requests: list[Request], num_tokens: list[int]
     ) -> list[list[int]]:
         """Draft up to ``num_tokens[i]`` tokens per request, verify, return the new tokens."""
+        if self.controller is not None:
+            num_tokens = self.controller.choose(requests, num_tokens)
         drafts = self.proposer.propose(requests, num_tokens)
         logits = runner.verify(requests, [d.tokens for d in drafts])
         results = []
@@ -289,9 +370,13 @@ class SpeculativeDecoder:
             else:
                 tokens = accept_sampled(draft, row, t, req.generator)
             self.stats.record(len(draft.tokens), len(tokens) - 1)
+            if self.controller is not None:
+                self.controller.update(req.request_id, len(draft.tokens), len(tokens) - 1)
             results.append(tokens)
         return results
 
     def release(self, request_id: int) -> None:
-        """Forward to the proposer."""
+        """Forget all state held for a request."""
         self.proposer.release(request_id)
+        if self.controller is not None:
+            self.controller.release(request_id)

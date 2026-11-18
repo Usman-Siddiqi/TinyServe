@@ -36,6 +36,7 @@ from tinyserve.scheduler import (
     StaticScheduler,
 )
 from tinyserve.speculative import (
+    DraftLengthController,
     DraftModelProposer,
     NgramProposer,
     Proposer,
@@ -246,7 +247,9 @@ class EngineConfig:
         speculative: speculative decoding proposer, one of :data:`SPEC_METHODS`,
             or None (off). ``early-exit`` drafts with the target's first layer,
             ``distilled`` with a small model trained by ``bench/distill_draft.py``.
-        num_speculative_tokens: draft tokens verified per request per step.
+        num_speculative_tokens: most draft tokens verified per request per step.
+        adaptive_speculation: pick each request's draft length from its recent
+            acceptance rate instead of always drafting ``num_speculative_tokens``.
     """
 
     strategy: str = "naive"
@@ -259,6 +262,11 @@ class EngineConfig:
     num_threads: int | None = None
     speculative: str | None = None
     num_speculative_tokens: int = 4
+    adaptive_speculation: bool = True
+
+
+# Rough cost of drafting one token relative to a target decode step (bench/spec_costs.py).
+DRAFT_COSTS = {"ngram": 0.01, "early-exit": 0.35, "distilled": 0.2}
 
 
 def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
@@ -292,7 +300,12 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step)
     speculator = None
     if cfg.speculative is not None:
-        speculator = SpeculativeDecoder(_build_proposer(cfg, model), cfg.num_speculative_tokens)
+        controller = None
+        if cfg.adaptive_speculation:
+            controller = DraftLengthController(DRAFT_COSTS[cfg.speculative])
+        speculator = SpeculativeDecoder(
+            _build_proposer(cfg, model), cfg.num_speculative_tokens, controller
+        )
     return Engine(model, scheduler, record_trace=record_trace, speculator=speculator)
 
 

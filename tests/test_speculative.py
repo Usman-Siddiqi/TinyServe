@@ -14,6 +14,7 @@ from tinyserve.request import Request, SamplingParams
 from tinyserve.scheduler import ContinuousScheduler
 from tinyserve.speculative import (
     Draft,
+    DraftLengthController,
     DraftModelProposer,
     NgramProposer,
     SpecStats,
@@ -149,3 +150,14 @@ def test_build_engine_with_speculation(model: TinyGPT, method: str) -> None:
 def test_distilled_draft_loads() -> None:
     draft = load_distilled_draft(ModelConfig())
     assert draft.cfg.n_layers == 1 and draft.cfg.vocab_size == ModelConfig().vocab_size
+
+
+def test_draft_length_controller_backs_off_and_probes() -> None:
+    ctrl = DraftLengthController(draft_cost=0.2, probe_every=3)
+    req = Request([5, 6], SamplingParams(max_new_tokens=50))
+    for _ in range(20):
+        ctrl.update(req.request_id, drafted=4, accepted=4)
+    assert ctrl.choose([req], [4]) == [4]
+    for _ in range(20):
+        ctrl.update(req.request_id, drafted=4, accepted=0)
+    assert [ctrl.choose([req], [4]) for _ in range(3)] == [[0], [0], [1]]
