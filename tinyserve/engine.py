@@ -140,17 +140,26 @@ class Engine:
                 for r in reqs:
                     slots[self.scheduler.slot_of[r.request_id]] = (r.request_id, phase)
         kv_usage = self.kv.usage()
-        prefill_tokens = sum(r.length for r in plan.prefill)
+        chunk_sizes = [plan.prefill_len(r) for r in plan.prefill]
+        prefill_tokens = sum(chunk_sizes)
 
-        results: list[tuple[Request, int]] = []
+        results: list[tuple[Request, int | None]] = []
         if plan.prefill:
-            results += zip(plan.prefill, self.runner.prefill(plan.prefill), strict=True)
+            tokens = self.runner.prefill(plan.prefill, chunk_sizes)
+            for req, n in zip(plan.prefill, chunk_sizes, strict=True):
+                req.num_computed_tokens += n
+            results += zip(plan.prefill, tokens, strict=True)
         if plan.decode:
-            results += zip(plan.decode, self.runner.decode(plan.decode), strict=True)
+            tokens = self.runner.decode(plan.decode)
+            for req in plan.decode:
+                req.num_computed_tokens = req.length
+            results += zip(plan.decode, tokens, strict=True)
 
         now = self.clock()
         outputs = []
         for req, token in results:
+            if token is None:  # a prefill chunk that has not reached the end yet
+                continue
             req.append_token(token, now)
             outputs.append(StepOutput(req, token, req.is_finished))
         self.scheduler.finish_step()

@@ -32,26 +32,47 @@ class ModelRunner:
         self.kv = kv
 
     @torch.inference_mode()
-    def prefill(self, requests: list[Request]) -> list[int]:
-        """Run every token of each request's sequence and sample one new token each.
+    def prefill(
+        self, requests: list[Request], num_tokens: list[int] | None = None
+    ) -> list[int | None]:
+        """Process the next ``num_tokens[i]`` uncomputed tokens of each request.
 
-        Sequences are right-padded to the longest one. Padding is excluded from the
-        cache writes, and its outputs are simply ignored.
+        Each request resumes at ``request.num_computed_tokens``, so a long prompt
+        can be prefilled over several steps (chunked prefill) or skip tokens whose
+        KV is already cached. A request whose chunk reaches the end of its sequence
+        samples its next token; the others get ``None``. Chunks are right-padded to
+        the longest one. Padding is excluded from cache writes and its outputs
+        are ignored.
         """
-        seqs = [r.all_ids for r in requests]
-        lengths = torch.tensor([len(s) for s in seqs])
+        starts = [r.num_computed_tokens for r in requests]
+        if num_tokens is None:
+            num_tokens = [r.length - s for r, s in zip(requests, starts, strict=True)]
+        chunks = [
+            r.all_ids[s : s + n] for r, s, n in zip(requests, starts, num_tokens, strict=True)
+        ]
+        lengths = torch.tensor(num_tokens)
         width = int(lengths.max())
-        input_ids = torch.full((len(seqs), width), PAD_ID, dtype=torch.long)
-        for i, s in enumerate(seqs):
-            input_ids[i, : len(s)] = torch.tensor(s)
-        arange = torch.arange(width).expand(len(seqs), -1)
+        input_ids = torch.full((len(chunks), width), PAD_ID, dtype=torch.long)
+        for i, c in enumerate(chunks):
+            input_ids[i, : len(c)] = torch.tensor(c)
+        arange = torch.arange(width).expand(len(chunks), -1)
         valid = arange < lengths[:, None]
-        positions = arange * valid  # padding gets position 0; it is never written
+        # Absolute positions; padding gets position 0 and is never written.
+        positions = (arange + torch.tensor(starts)[:, None]) * valid
 
         kv = self.kv.build_batch([r.request_id for r in requests], positions, valid)
         hidden = self.model.hidden_states(input_ids, positions, kv)
-        last_hidden = hidden[torch.arange(len(seqs)), lengths - 1]
-        return sample(self.model.logits(last_hidden), requests)
+        last_hidden = hidden[torch.arange(len(chunks)), lengths - 1]
+        done = [s + n == r.length for r, s, n in zip(requests, starts, num_tokens, strict=True)]
+        if not any(done):
+            return [None] * len(requests)
+        sampled = iter(
+            sample(
+                self.model.logits(last_hidden[done]),
+                [r for r, d in zip(requests, done, strict=True) if d],
+            )
+        )
+        return [next(sampled) if d else None for d in done]
 
     @torch.inference_mode()
     def decode(self, requests: list[Request]) -> list[int]:

@@ -28,14 +28,24 @@ class SchedulerOutput:
     """What to run in one engine step.
 
     Attributes:
-        prefill: requests that need their whole sequence processed this step.
+        prefill: requests whose sequence (or the next chunk of it) is processed
+            this step. A request samples its first token once its prefill completes.
         decode: requests that generate one token this step.
         preempted: requests that were kicked out of memory to make room.
+        prefill_chunks: optional ``request_id -> number of tokens`` to process for
+            a prefill request this step. Missing entries mean "everything that is
+            not computed yet".
     """
 
     prefill: list[Request] = field(default_factory=list)
     decode: list[Request] = field(default_factory=list)
     preempted: list[Request] = field(default_factory=list)
+    prefill_chunks: dict[int, int] = field(default_factory=dict)
+
+    def prefill_len(self, request: Request) -> int:
+        """Tokens of ``request`` this step's prefill will process."""
+        remaining = request.length - request.num_computed_tokens
+        return self.prefill_chunks.get(request.request_id, remaining)
 
     @property
     def is_empty(self) -> bool:
@@ -45,7 +55,7 @@ class SchedulerOutput:
     @property
     def num_tokens(self) -> int:
         """Tokens processed by the model this step."""
-        return sum(r.length for r in self.prefill) + len(self.decode)
+        return sum(self.prefill_len(r) for r in self.prefill) + len(self.decode)
 
 
 class Scheduler(ABC):
@@ -249,6 +259,7 @@ class ContinuousScheduler(Scheduler):
         """Evict a running request back to the head of the waiting queue."""
         self._release(request)
         request.status = RequestStatus.WAITING
+        request.num_computed_tokens = 0  # its KV is gone; recompute from scratch
         request.num_preemptions += 1
         self.num_preemptions += 1
         self.waiting.appendleft(request)

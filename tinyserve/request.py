@@ -58,9 +58,10 @@ class FinishReason(enum.Enum):
 class Request:
     """One generation request and everything the engine tracks about it.
 
-    The KV-cache invariant the engine maintains: after every step, the cache holds
-    KV for every token of ``all_ids`` except the most recently sampled one. The
-    next decode step feeds exactly that token.
+    The KV-cache invariant the engine maintains: once a request is fully prefilled,
+    the cache holds KV for every token of ``all_ids`` except the most recently
+    sampled one (``num_computed_tokens == length - 1``). The next decode step
+    feeds exactly that token.
     """
 
     prompt_ids: list[int]
@@ -75,6 +76,9 @@ class Request:
     finish_time: float | None = None
     token_times: list[float] = field(default_factory=list)
     num_preemptions: int = 0
+    # How many tokens of ``all_ids`` already have their KV in the cache. A prefill
+    # may process the sequence in several chunks, resuming from here.
+    num_computed_tokens: int = 0
     _generator: torch.Generator | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:

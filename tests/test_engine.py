@@ -184,3 +184,20 @@ def test_continuous_respects_token_budget(model: TinyGPT) -> None:
         engine.step()
     assert [t.num_prefill for t in engine.trace[:2]] == [1, 1]
     assert all(t.num_prefill_tokens + t.num_decode <= 40 for t in engine.trace)
+
+
+def test_prefill_can_resume_in_chunks(model: TinyGPT) -> None:
+    """Prefilling a prompt in three chunks samples the same first token as one pass."""
+    from tinyserve.runner import ModelRunner
+
+    prompt = make_prompts(1, seed=9, min_len=25, max_len=25)[0]
+    kv = contiguous_kv(1)
+    runner = ModelRunner(model, kv)
+    req = Request(prompt, GREEDY)
+    kv.allocate(req.request_id, req.length)
+    outs = []
+    for n in (10, 9, 6):
+        outs += runner.prefill([req], [n])
+        req.num_computed_tokens += n
+    assert outs[:2] == [None, None]
+    assert outs[2] == reference_generate(model, prompt, SamplingParams(max_new_tokens=1))[0]
