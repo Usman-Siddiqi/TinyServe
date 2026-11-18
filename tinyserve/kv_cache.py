@@ -8,7 +8,8 @@ memory, and *how it is laid out* decides how many requests fit at once.
 This module splits the problem in two:
 
 * :class:`KVPool` is dumb storage: per layer, one flat tensor of ``num_slots``
-  token slots, each holding a key and a value of shape ``(n_kv_heads, head_dim)``.
+  token slots, each holding a key and a value of shape ``(n_kv_heads, head_dim)``,
+  in float32, bfloat16 or int8 (see :mod:`tinyserve.kv_quant`).
 * A :class:`KVCacheManager` owns the bookkeeping: which slots belong to which
   sequence. It turns "token ``j`` of sequence ``s``" into a physical slot address.
 
@@ -30,9 +31,16 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
+from tinyserve.kv_quant import dequantize_int8, kv_format, quantize_int8
+
 
 class KVPool:
-    """Physical KV storage: ``k[layer]`` and ``v[layer]`` of shape ``(num_slots, H, D)``."""
+    """Physical KV storage: ``k[layer]`` and ``v[layer]`` of shape ``(num_slots, H, D)``.
+
+    ``kv_dtype`` picks the storage format (see :mod:`tinyserve.kv_quant`). For
+    ``"int8"`` each (token, head) vector also has a float32 scale in ``k_scale`` /
+    ``v_scale``. Reads return keys/values in the format's compute dtype.
+    """
 
     def __init__(
         self,
@@ -40,17 +48,72 @@ class KVPool:
         n_layers: int,
         n_kv_heads: int,
         head_dim: int,
-        dtype: torch.dtype = torch.float32,
+        kv_dtype: str = "float32",
     ) -> None:
         self.num_slots = num_slots
+        self.format = kv_format(kv_dtype)
         shape = (n_layers, num_slots, n_kv_heads, head_dim)
-        self.k = torch.zeros(shape, dtype=dtype)
-        self.v = torch.zeros(shape, dtype=dtype)
+        self.k = torch.zeros(shape, dtype=self.format.storage)
+        self.v = torch.zeros(shape, dtype=self.format.storage)
+        if self.format.quantized:
+            self.k_scale = torch.zeros(shape[:-1])
+            self.v_scale = torch.zeros(shape[:-1])
+        # Optional per-channel key divisors (n_layers, H, D); see calibrate_key_smoothing.
+        self.key_smoothing: Tensor | None = None
+
+    @staticmethod
+    def bytes_per_token(n_layers: int, n_kv_heads: int, head_dim: int, kv_dtype: str) -> int:
+        """Bytes one token slot takes across all layers (keys + values, scales included)."""
+        return 2 * n_layers * n_kv_heads * kv_format(kv_dtype).bytes_per_head(head_dim)
+
+    @property
+    def kv_dtype(self) -> str:
+        """Name of the storage format."""
+        return self.format.name
 
     @property
     def nbytes(self) -> int:
-        """Total bytes held by the pool (keys + values, all layers)."""
-        return self.k.nbytes + self.v.nbytes
+        """Total bytes held by the pool (keys + values + scales, all layers)."""
+        total = self.k.nbytes + self.v.nbytes
+        if self.format.quantized:
+            total += self.k_scale.nbytes + self.v_scale.nbytes
+        return total
+
+    def write(self, layer: int, slots: Tensor, k: Tensor, v: Tensor) -> None:
+        """Store ``(N, H, D)`` keys/values at ``slots`` ``(N,)``."""
+        if self.key_smoothing is not None:
+            k = k / self.key_smoothing[layer]
+        if self.format.quantized:
+            k, k_scale = quantize_int8(k)
+            v, v_scale = quantize_int8(v)
+            self.k_scale[layer][slots] = k_scale
+            self.v_scale[layer][slots] = v_scale
+        self.k[layer][slots] = k.to(self.format.storage)
+        self.v[layer][slots] = v.to(self.format.storage)
+
+    def smooth_queries(self, layer: int, q: Tensor) -> Tensor:
+        """Scale ``(..., n_heads, D)`` queries by the key smoothing so ``q . k`` is unchanged."""
+        if self.key_smoothing is None:
+            return q
+        s = self.key_smoothing[layer]
+        return q * s.repeat_interleave(q.shape[-2] // s.shape[0], dim=0)
+
+    def read(self, layer: int, slots: Tensor) -> tuple[Tensor, Tensor]:
+        """Gather ``slots`` ``(G, L)`` into dense ``(G, L, H, D)`` tensors of the compute dtype.
+
+        With key smoothing on, keys come back divided by it (see :meth:`smooth_queries`).
+        """
+        flat = slots.reshape(-1)
+        shape = (*slots.shape, *self.k.shape[2:])
+        # index_select on the flattened slots is much faster than advanced indexing.
+        k = self.k[layer].index_select(0, flat).view(shape)
+        v = self.v[layer].index_select(0, flat).view(shape)
+        if self.format.quantized:
+            dtype = self.format.compute
+            k_scale = self.k_scale[layer].index_select(0, flat).view(shape[:-1])
+            v_scale = self.v_scale[layer].index_select(0, flat).view(shape[:-1])
+            return dequantize_int8(k, k_scale, dtype), dequantize_int8(v, v_scale, dtype)
+        return k, v
 
 
 @dataclass
@@ -90,12 +153,11 @@ class KVBatch:
 
     def write(self, layer: int, k: Tensor, v: Tensor) -> None:
         """Store the new ``(B, S, H, D)`` keys/values at their slots."""
-        self.pool.k[layer][self.write_slots] = k[self.write_mask]
-        self.pool.v[layer][self.write_slots] = v[self.write_mask]
+        self.pool.write(layer, self.write_slots, k[self.write_mask], v[self.write_mask])
 
     def read(self, layer: int, read_slots: Tensor) -> tuple[Tensor, Tensor]:
         """Gather keys/values at ``read_slots`` ``(G, L)`` into dense ``(G, L, H, D)`` tensors."""
-        return self.pool.k[layer][read_slots], self.pool.v[layer][read_slots]
+        return self.pool.read(layer, read_slots)
 
 
 @dataclass(frozen=True)

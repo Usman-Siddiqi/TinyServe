@@ -21,7 +21,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from tinyserve.kv_cache import KVBatch
+from tinyserve.kv_cache import KVBatch, KVPool
 from tinyserve.tokenizer import CharTokenizer
 
 
@@ -47,10 +47,9 @@ class ModelConfig:
         """Size of each attention head."""
         return self.d_model // self.n_heads
 
-    def kv_bytes_per_token(self, dtype: torch.dtype = torch.float32) -> int:
+    def kv_bytes_per_token(self, kv_dtype: str = "float32") -> int:
         """Bytes of KV cache needed for one token across all layers (keys + values)."""
-        elem = torch.empty((), dtype=dtype).element_size()
-        return 2 * self.n_layers * self.n_kv_heads * self.head_dim * elem
+        return KVPool.bytes_per_token(self.n_layers, self.n_kv_heads, self.head_dim, kv_dtype)
 
 
 class Attention(nn.Module):
@@ -94,6 +93,7 @@ class Attention(nn.Module):
             # Write the new keys/values into the cache, then read each sequence's
             # full history (old tokens + the ones just written) back and attend.
             kv.write(self.layer_idx, k, v)
+            q = kv.pool.smooth_queries(self.layer_idx, q)
             out = torch.empty_like(q)
             for group in kv.groups:
                 keys, values = kv.read(self.layer_idx, group.read_slots)
@@ -116,14 +116,15 @@ class Attention(nn.Module):
         if key_positions.dim() == 1:
             key_positions = key_positions.expand(q.shape[0], -1)
         mask = key_positions[:, None, :] <= q_positions[:, :, None]  # (B, S, L)
+        # A low-precision cache attends in its own dtype (bf16 SDPA is fast on CPU).
         out = F.scaled_dot_product_attention(
-            q.transpose(1, 2),  # (B, H, S, D)
+            q.to(keys.dtype).transpose(1, 2),  # (B, H, S, D)
             keys.transpose(1, 2),  # (B, H, L, D)
             values.transpose(1, 2),
             attn_mask=mask[:, None, :, :],
             enable_gqa=True,
         )
-        return out.transpose(1, 2)  # (B, S, H, D)
+        return out.transpose(1, 2).to(q.dtype)  # (B, S, H, D)
 
 
 class Block(nn.Module):
