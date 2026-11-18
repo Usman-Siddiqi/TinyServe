@@ -104,7 +104,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install torch==2.9.1 --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,bench]"
 
-pytest                      # 41 tests, a few seconds
+pytest                      # 53 tests, a few seconds
 ```
 
 **Run the server** (continuous batching with a paged KV cache by default):
@@ -112,6 +112,7 @@ pytest                      # 41 tests, a few seconds
 ```bash
 tinyserve-server --port 8000
 # or: tinyserve-server --strategy static --max-batch-size 16
+# or: tinyserve-server --chunked-prefill --max-tokens-per-step 256
 ```
 
 **Stream a completion** over Server-Sent Events:
@@ -171,6 +172,7 @@ tinyserve-loadgen --url http://127.0.0.1:8000 --num-requests 100 --rate 10
 python bench/run.py          # writes bench/results/results.json (raw, per request)
 python bench/plot.py         # renders docs/assets/*.png and bench/results/results.md
 python docs/make_visuals.py  # renders the two GIFs from real engine traces
+python bench/chunked_prefill.py  # chunked vs. unchunked prefill, incl. inter-token latency
 ```
 
 ## Project structure
@@ -191,6 +193,7 @@ tinyserve/
   loadgen.py       async HTTP load generator
 bench/
   run.py           benchmark all strategies, save raw JSON
+  chunked_prefill.py  chunked vs. unchunked prefill on default and prompt-heavy workloads
   plot.py          charts + results table from that JSON
   results/         the raw results behind every number in this README
 docs/
@@ -218,6 +221,7 @@ All three share a FIFO waiting queue and a running list, and differ only in when
 - **`NaiveScheduler`** runs one request start to finish.
 - **`StaticScheduler`** boards up to `max_batch_size` requests when the batch is empty and runs them until all are done. It is given a head start: finished requests are dropped from the compute rather than decoded as padding.
 - **`ContinuousScheduler`** re-plans at every step. It first reserves KV room for every running request's next token, preempting the newest request if memory runs out. Then it admits waiting requests in FIFO order while there is a free seat, the step's token budget (`max_tokens_per_step`, which bounds how long a burst of long prompts can stall everyone else) allows it, and their KV memory fits. Newcomers are prefilled in the same step the others decode.
+  With `chunked_prefill=True` (Sarathi-Serve style), a prompt no longer has to fit in one step: the budget is filled decode-first, then with prefill chunks, continuing prefills that are under way before admitting anyone new. Steps stay roughly the same size, so a burst of long prompts cannot stall everyone's next token. A request samples only once its last chunk is in.
 
 Preemption uses **recompute**: the victim's memory is freed and it goes back to the front of the queue keeping the tokens it generated. On readmission its whole sequence is prefilled again, which costs compute but needs no extra memory (vLLM's default strategy). A test squeezes six requests into memory for two and checks that outputs are unchanged.
 
@@ -248,7 +252,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 - **Random weights.** The output is noise. Under greedy decoding the model tends to repeat one character; use `temperature` for more varied noise.
 - **Simplified attention.** There is no fused paged-attention kernel: each step gathers a sequence's K/V from its blocks into a temporary dense tensor and calls PyTorch's `scaled_dot_product_attention`. That extra copy is the main cost of decoding long sequences in big batches, and it is why nearly doubling the batch with paging buys 1.3x more throughput here rather than 2x. Prefill batches are padded to their longest prompt.
 - **A toy model and tokenizer.** 11M parameters, a character vocabulary, learned positions instead of RoPE, float32 throughout.
-- **No chunked prefill or prefill/decode disaggregation.** A long prompt is prefilled in one go (bounded by the per-step token budget).
+- **No prefill/decode disaggregation.** Chunked prefill is opt-in, and a step's prefill chunks and decodes still run as two forward passes.
 
 ## Roadmap
 
@@ -256,7 +260,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 - [ ] **Speculative decoding**: a smaller draft model proposes several tokens and the main model verifies them in one pass.
 - [ ] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor.
 - [ ] **Preemption by swapping**: move a victim's blocks to a CPU-side pool instead of recomputing them.
-- [ ] Chunked prefill, so long prompts never stall decoding.
+- [x] Chunked prefill, so long prompts never stall decoding.
 - [ ] A bf16 KV cache to halve memory traffic.
 
 ## License
