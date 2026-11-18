@@ -19,12 +19,17 @@ The only thing that differs between memory layouts is that address function:
 * :class:`PagedKVCache` hands out small fixed-size blocks on demand, like the
   pages of virtual memory (and vLLM's PagedAttention), so
   ``address = block_table[j // B] * B + j % B``.
+
+:class:`PrefixCachingKVCache` adds automatic prefix caching on top of paging:
+full blocks are shared between sequences that start with the same tokens.
 """
 
 from __future__ import annotations
 
+import itertools
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections import OrderedDict
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 import torch
@@ -106,11 +111,13 @@ class KVUsage:
         used_tokens: slots holding a real token's KV right now.
         reserved_tokens: slots handed out to sequences (used + reserved-but-empty).
         capacity_tokens: total slots in the pool.
+        cached_tokens: free slots that still hold reusable KV (prefix caching only).
     """
 
     used_tokens: int
     reserved_tokens: int
     capacity_tokens: int
+    cached_tokens: int = 0
 
     @property
     def utilization(self) -> float:
@@ -128,6 +135,26 @@ class KVUsage:
         return self.reserved_tokens - self.used_tokens
 
 
+@dataclass
+class PrefixCacheStats:
+    """Cumulative prefix-cache counters, over every admission (re-admissions included).
+
+    Attributes:
+        query_tokens: tokens of the sequences admitted.
+        hit_tokens: of those, tokens whose KV was already in the cache.
+        evicted_blocks: cached blocks reclaimed to make room for new ones.
+    """
+
+    query_tokens: int = 0
+    hit_tokens: int = 0
+    evicted_blocks: int = 0
+
+    @property
+    def hit_rate(self) -> float:
+        """Fraction of admitted tokens that did not need to be prefilled."""
+        return self.hit_tokens / self.query_tokens if self.query_tokens else 0.0
+
+
 class KVCacheManager(ABC):
     """Bookkeeping for which pool slots belong to which sequence.
 
@@ -138,6 +165,7 @@ class KVCacheManager(ABC):
     """
 
     layout = "base"
+    prefix_caching = False
 
     def __init__(self, pool: KVPool) -> None:
         self.pool = pool
@@ -146,14 +174,22 @@ class KVCacheManager(ABC):
     # --- allocation -------------------------------------------------------------
 
     @abstractmethod
-    def can_allocate(self, num_tokens: int) -> bool:
+    def can_allocate(self, num_tokens: int, token_ids: Sequence[int] | None = None) -> bool:
         """Whether a *new* sequence needing ``num_tokens`` slots would fit right now."""
 
-    def allocate(self, seq_id: int, num_tokens: int) -> bool:
-        """Reserve memory for a new sequence of ``num_tokens``. Returns False if it won't fit."""
+    def allocate(
+        self, seq_id: int, num_tokens: int, token_ids: Sequence[int] | None = None
+    ) -> bool:
+        """Reserve memory for a new sequence of ``num_tokens``. Returns False if it won't fit.
+
+        Given the sequence's ``token_ids``, a prefix-caching manager shares the
+        blocks of its first :meth:`match_prefix` tokens instead of allocating them.
+        """
         if seq_id in self._lengths:
             raise ValueError(f"sequence {seq_id} is already allocated")
-        if not self.can_allocate(num_tokens) or not self._allocate(seq_id, num_tokens):
+        if not self.can_allocate(num_tokens, token_ids):
+            return False
+        if not self._allocate(seq_id, num_tokens, token_ids):
             return False
         self._lengths[seq_id] = num_tokens
         return True
@@ -180,8 +216,19 @@ class KVCacheManager(ABC):
         """Number of sequences currently holding memory."""
         return len(self._lengths)
 
+    def match_prefix(self, token_ids: Sequence[int]) -> int:
+        """How many leading tokens of ``token_ids`` already have their KV cached."""
+        return 0
+
+    def cache_blocks(self, seq_id: int, token_ids: Sequence[int]) -> None:  # noqa: B027
+        """Record that the KV of ``token_ids``, a prefix of ``seq_id``, is computed."""
+
+    def prefix_cache_stats(self) -> PrefixCacheStats | None:
+        """Hit-rate counters, or None if this manager does not cache prefixes."""
+        return None
+
     @abstractmethod
-    def _allocate(self, seq_id: int, num_tokens: int) -> bool: ...
+    def _allocate(self, seq_id: int, num_tokens: int, token_ids: Sequence[int] | None) -> bool: ...
 
     @abstractmethod
     def _grow(self, seq_id: int, num_tokens: int) -> bool: ...
@@ -262,11 +309,11 @@ class ContiguousKVCache(KVCacheManager):
         self._free_rows = list(range(self.num_rows - 1, -1, -1))  # pop() yields row 0 first
         self._row_of: dict[int, int] = {}
 
-    def can_allocate(self, num_tokens: int) -> bool:
+    def can_allocate(self, num_tokens: int, token_ids: Sequence[int] | None = None) -> bool:
         """A new sequence fits if any slab is free and it is not longer than a slab."""
         return bool(self._free_rows) and num_tokens <= self.max_seq_len
 
-    def _allocate(self, seq_id: int, num_tokens: int) -> bool:
+    def _allocate(self, seq_id: int, num_tokens: int, token_ids: Sequence[int] | None) -> bool:
         self._row_of[seq_id] = self._free_rows.pop()
         return True
 
@@ -318,7 +365,7 @@ class BlockAllocator:
     @property
     def num_used(self) -> int:
         """Blocks currently handed out."""
-        return self.num_blocks - len(self._free)
+        return self.num_blocks - self.num_free
 
     def allocate(self) -> int:
         """Take one block off the free list."""
@@ -338,6 +385,88 @@ class BlockAllocator:
     def free_blocks(self) -> Iterator[int]:
         """Iterate over the currently free block ids."""
         return iter(self._free)
+
+
+class CachingBlockAllocator(BlockAllocator):
+    """A block allocator with reference counts and a content-addressed block cache.
+
+    A block registered under a hash keeps its KV when its last owner frees it: it
+    becomes *evictable* instead of free, and a later sequence with the same prefix
+    can take it back with :meth:`acquire`. Evictable blocks count as free space and
+    are reclaimed least-recently-freed first, once no clean block is left.
+    """
+
+    def __init__(self, num_blocks: int) -> None:
+        super().__init__(num_blocks)
+        self.ref_counts = [0] * num_blocks
+        self.num_shared_refs = 0  # sum over blocks of (owners - 1)
+        self.num_evictions = 0
+        self._evictable: OrderedDict[int, None] = OrderedDict()  # least recently freed first
+        self._hash_of: dict[int, int] = {}
+        self._block_of: dict[int, int] = {}
+
+    @property
+    def num_free(self) -> int:
+        """Blocks available: clean ones plus evictable cached ones."""
+        return len(self._free) + len(self._evictable)
+
+    @property
+    def num_evictable(self) -> int:
+        """Free blocks that still hold cached KV."""
+        return len(self._evictable)
+
+    def allocate(self) -> int:
+        """Take a clean block, or evict the least recently freed cached block."""
+        if self._free:
+            block = self._free.pop()
+        elif self._evictable:
+            block, _ = self._evictable.popitem(last=False)
+            del self._block_of[self._hash_of.pop(block)]
+            self.num_evictions += 1
+        else:
+            raise OutOfBlocksError("no free KV blocks")
+        self.ref_counts[block] = 1
+        return block
+
+    def free(self, block: int) -> None:
+        """Drop one owner. An unowned block becomes evictable if cached, else clean."""
+        refs = self.ref_counts[block]
+        if refs == 0:
+            raise ValueError(f"block {block} is already free (double free)")
+        self.ref_counts[block] = refs - 1
+        if refs > 1:
+            self.num_shared_refs -= 1
+        elif block in self._hash_of:
+            self._evictable[block] = None
+        else:
+            self._free.append(block)
+
+    def free_blocks(self) -> Iterator[int]:
+        """Iterate over the free block ids, clean ones first."""
+        return itertools.chain(self._free, self._evictable)
+
+    def lookup(self, block_hash: int) -> int | None:
+        """The cached block holding the content identified by ``block_hash``, if any."""
+        return self._block_of.get(block_hash)
+
+    def acquire(self, block: int) -> None:
+        """Add an owner to a cached block, taking it off the evictable list if needed."""
+        if self.ref_counts[block] == 0:
+            del self._evictable[block]
+        else:
+            self.num_shared_refs += 1
+        self.ref_counts[block] += 1
+
+    def register(self, block: int, block_hash: int) -> None:
+        """Make ``block`` findable by ``block_hash``. The first block with a hash wins."""
+        if block_hash not in self._block_of and block not in self._hash_of:
+            self._hash_of[block] = block_hash
+            self._block_of[block_hash] = block
+
+
+def block_hash(parent: int | None, token_ids: Sequence[int]) -> int:
+    """Hash of a full block, chained over its parent's so it identifies the whole prefix."""
+    return hash((parent, tuple(token_ids)))
 
 
 class PagedKVCache(KVCacheManager):
@@ -369,12 +498,12 @@ class PagedKVCache(KVCacheManager):
         """Number of blocks that hold ``num_tokens`` tokens."""
         return -(-num_tokens // self.block_size)  # ceil division
 
-    def can_allocate(self, num_tokens: int) -> bool:
+    def can_allocate(self, num_tokens: int, token_ids: Sequence[int] | None = None) -> bool:
         """A new sequence fits if its blocks are free without dipping into the watermark."""
         needed = self.blocks_needed(num_tokens)
         return needed <= self.allocator.num_free - self.watermark_blocks
 
-    def _allocate(self, seq_id: int, num_tokens: int) -> bool:
+    def _allocate(self, seq_id: int, num_tokens: int, token_ids: Sequence[int] | None) -> bool:
         needed = self.blocks_needed(num_tokens)
         self.block_tables[seq_id] = [self.allocator.allocate() for _ in range(needed)]
         return True
@@ -404,3 +533,104 @@ class PagedKVCache(KVCacheManager):
     def reserved_tokens(self) -> int:
         """Every allocated block counts in full."""
         return self.allocator.num_used * self.block_size
+
+
+class PrefixCachingKVCache(PagedKVCache):
+    """A paged KV cache that shares full blocks between sequences with a common prefix.
+
+    Each full block is identified by :func:`block_hash`, chained over the blocks
+    before it, so equal hashes mean equal prefixes (barring a 64-bit hash
+    collision) and therefore equal KV. A new
+    sequence reuses the longest run of cached blocks at its start and only
+    prefills the rest. Full blocks are never written again, so sharing them needs
+    no copy-on-write; a sequence's partial last block is always private.
+
+    Freed blocks stay cached as evictable free space, so a later request with the
+    same system prompt, or a preempted request coming back, can find them again.
+    """
+
+    prefix_caching = True
+
+    def __init__(self, pool: KVPool, block_size: int = 16, watermark: float = 0.01) -> None:
+        super().__init__(pool, block_size, watermark)
+        self.allocator: CachingBlockAllocator = CachingBlockAllocator(self.allocator.num_blocks)
+        self._block_hashes: dict[int, list[int]] = {}  # hashes of each sequence's cached blocks
+        self._stats = PrefixCacheStats()
+
+    def _match(self, token_ids: Sequence[int]) -> tuple[list[int], list[int]]:
+        """Blocks and hashes of the longest cached prefix of ``token_ids``.
+
+        The last token is never matched: it must be prefilled to produce the
+        logits for the next token.
+        """
+        blocks: list[int] = []
+        hashes: list[int] = []
+        parent = None
+        bs = self.block_size
+        for i in range((len(token_ids) - 1) // bs):
+            parent = block_hash(parent, token_ids[i * bs : (i + 1) * bs])
+            block = self.allocator.lookup(parent)
+            if block is None:
+                break
+            blocks.append(block)
+            hashes.append(parent)
+        return blocks, hashes
+
+    def match_prefix(self, token_ids: Sequence[int]) -> int:
+        """Leading tokens of ``token_ids`` whose KV is cached (a multiple of the block size)."""
+        return len(self._match(token_ids)[0]) * self.block_size
+
+    def can_allocate(self, num_tokens: int, token_ids: Sequence[int] | None = None) -> bool:
+        """Like :meth:`PagedKVCache.can_allocate`, but cache hits in use cost no memory."""
+        needed = self.blocks_needed(num_tokens)
+        if token_ids is not None:
+            hits, _ = self._match(token_ids)
+            # An evictable hit leaves the free pool when acquired, so it is not free.
+            needed -= sum(self.allocator.ref_counts[b] > 0 for b in hits)
+        return needed <= self.allocator.num_free - self.watermark_blocks
+
+    def _allocate(self, seq_id: int, num_tokens: int, token_ids: Sequence[int] | None) -> bool:
+        hits, hashes = self._match(token_ids) if token_ids is not None else ([], [])
+        for block in hits:  # before allocating, so the hits cannot be evicted
+            self.allocator.acquire(block)
+        num_fresh = self.blocks_needed(num_tokens) - len(hits)
+        self.block_tables[seq_id] = hits + [self.allocator.allocate() for _ in range(num_fresh)]
+        self._block_hashes[seq_id] = hashes
+        self._stats.query_tokens += num_tokens
+        self._stats.hit_tokens += len(hits) * self.block_size
+        return True
+
+    def cache_blocks(self, seq_id: int, token_ids: Sequence[int]) -> None:
+        """Register the full blocks of ``token_ids`` (whose KV is computed) in the cache."""
+        hashes = self._block_hashes[seq_id]
+        num_full = len(token_ids) // self.block_size
+        if num_full <= len(hashes):
+            return
+        table = self.block_tables[seq_id]
+        parent = hashes[-1] if hashes else None
+        bs = self.block_size
+        for i in range(len(hashes), num_full):
+            parent = block_hash(parent, token_ids[i * bs : (i + 1) * bs])
+            self.allocator.register(table[i], parent)
+            hashes.append(parent)
+
+    def _free(self, seq_id: int) -> None:
+        # Tail first, so it is evicted before the more widely shared head.
+        for block in reversed(self.block_tables.pop(seq_id)):
+            self.allocator.free(block)
+        del self._block_hashes[seq_id]
+
+    def prefix_cache_stats(self) -> PrefixCacheStats:
+        """Hit-rate and eviction counters since the cache was created."""
+        self._stats.evicted_blocks = self.allocator.num_evictions
+        return self._stats
+
+    def usage(self) -> KVUsage:
+        """Like the base usage, but a block shared by several sequences counts once."""
+        shared = self.allocator.num_shared_refs * self.block_size
+        return KVUsage(
+            used_tokens=sum(self._lengths.values()) - shared,
+            reserved_tokens=self.reserved_tokens(),
+            capacity_tokens=self.pool.num_slots,
+            cached_tokens=self.allocator.num_evictable * self.block_size,
+        )

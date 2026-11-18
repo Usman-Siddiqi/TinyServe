@@ -24,6 +24,7 @@ from tinyserve.kv_cache import (
     KVPool,
     KVUsage,
     PagedKVCache,
+    PrefixCachingKVCache,
 )
 from tinyserve.model import ModelConfig, TinyGPT
 from tinyserve.request import Request, SamplingParams
@@ -206,6 +207,8 @@ class EngineConfig:
             ``"paged"`` (fixed-size blocks on demand). Paged needs preemption to
             handle running out of memory, so only ``continuous`` supports it.
         block_size: tokens per block for the paged layout.
+        enable_prefix_caching: share the KV of common prompt prefixes between
+            requests (paged layout only).
         num_threads: PyTorch intra-op threads (None leaves the default).
     """
 
@@ -216,6 +219,7 @@ class EngineConfig:
     max_tokens_per_step: int = 2048
     kv_layout: str = "contiguous"
     block_size: int = 16
+    enable_prefix_caching: bool = False
     num_threads: int | None = None
 
 
@@ -227,6 +231,8 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
         raise ValueError(f"unknown kv_layout {cfg.kv_layout!r}; choose from {KV_LAYOUTS}")
     if cfg.kv_layout == "paged" and cfg.strategy != "continuous":
         raise ValueError("the paged KV cache needs preemption, which only 'continuous' has")
+    if cfg.enable_prefix_caching and cfg.kv_layout != "paged":
+        raise ValueError("prefix caching needs the paged KV cache")
     if cfg.kv_capacity_tokens < cfg.model.max_seq_len:
         raise ValueError("kv_capacity_tokens must hold at least one max_seq_len sequence")
     if cfg.num_threads is not None:
@@ -235,7 +241,9 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     model = TinyGPT(m)
     pool = KVPool(cfg.kv_capacity_tokens, m.n_layers, m.n_kv_heads, m.head_dim)
     kv: KVCacheManager
-    if cfg.kv_layout == "paged":
+    if cfg.enable_prefix_caching:
+        kv = PrefixCachingKVCache(pool, cfg.block_size)
+    elif cfg.kv_layout == "paged":
         kv = PagedKVCache(pool, cfg.block_size)
     else:
         kv = ContiguousKVCache(pool, m.max_seq_len)
