@@ -103,6 +103,11 @@ class Request:
         return len(self.prompt_ids) + self.params.max_new_tokens
 
     @property
+    def needs_prefill(self) -> bool:
+        """True until the cache holds every token except the last generated one."""
+        return not self.output_ids or self.num_computed_tokens < self.length - 1
+
+    @property
     def is_finished(self) -> bool:
         """True once the request has stopped generating."""
         return self.status is RequestStatus.FINISHED

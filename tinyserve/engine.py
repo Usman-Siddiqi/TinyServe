@@ -204,6 +204,8 @@ class EngineConfig:
             gets the same pool so comparisons are apples to apples.
         max_batch_size: most requests running at once (ignored by ``naive``).
         max_tokens_per_step: per-step token budget of the continuous scheduler.
+        chunked_prefill: let the continuous scheduler split long prefills across
+            steps so they do not stall running requests.
         kv_layout: ``"contiguous"`` (one max_seq_len slab per request) or
             ``"paged"`` (fixed-size blocks on demand). Paged needs preemption to
             handle running out of memory, so only ``continuous`` supports it.
@@ -222,6 +224,7 @@ class EngineConfig:
     kv_capacity_tokens: int = 8192
     max_batch_size: int = 32
     max_tokens_per_step: int = 2048
+    chunked_prefill: bool = False
     kv_layout: str = "contiguous"
     block_size: int = 16
     enable_prefix_caching: bool = False
@@ -284,5 +287,7 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
     elif cfg.strategy == "static":
         scheduler = StaticScheduler(kv, cfg.max_batch_size)
     else:
-        scheduler = ContinuousScheduler(kv, cfg.max_batch_size, cfg.max_tokens_per_step)
+        scheduler = ContinuousScheduler(
+            kv, cfg.max_batch_size, cfg.max_tokens_per_step, cfg.chunked_prefill
+        )
     return Engine(model, scheduler, record_trace=record_trace)

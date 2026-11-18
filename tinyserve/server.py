@@ -161,6 +161,10 @@ def main() -> None:
         default=True,
         help="share KV blocks of common prompt prefixes (paged layout only)",
     )
+    parser.add_argument("--max-tokens-per-step", type=int, default=2048)
+    parser.add_argument(
+        "--chunked-prefill", action="store_true", help="split long prefills across steps"
+    )
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
@@ -175,6 +179,8 @@ def main() -> None:
         kv_layout=args.kv_layout,
         block_size=args.block_size,
         enable_prefix_caching=args.prefix_caching,
+        max_tokens_per_step=args.max_tokens_per_step,
+        chunked_prefill=args.chunked_prefill,
         num_threads=args.threads,
         kv_dtype=args.kv_dtype,
         kv_memory_bytes=None if args.kv_memory_mib is None else int(args.kv_memory_mib * 2**20),

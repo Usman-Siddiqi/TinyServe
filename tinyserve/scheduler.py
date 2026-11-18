@@ -212,58 +212,88 @@ class ContinuousScheduler(Scheduler):
        out, *preempt* the most recently admitted request: free its KV and put it
        back at the front of the queue. When it is readmitted its whole sequence is
        prefilled again ("recompute" preemption; nothing it generated is lost).
-    2. **Admit** waiting requests, oldest first, while there is a free seat, the
-       step's token budget allows it and their KV memory fits. Newly admitted
-       requests are prefilled in this same step.
+    2. **Prefill** with whatever is left of the step's token budget: first
+       requests whose prefill is already under way, then newly admitted ones
+       (oldest first, while there is a free seat and their KV memory fits).
+
+    Without chunking, a prompt must fit in the leftover budget in one piece, so
+    the step that prefills it takes as long as the whole prompt and every running
+    request waits that long for its next token. With ``chunked_prefill`` a prompt
+    is split across steps (Sarathi-Serve), which keeps every step roughly the
+    same size and smooths out inter-token latency.
 
     Args:
         kv: the KV cache manager.
         max_batch_size: most requests running at once.
         max_tokens_per_step: token budget per step (prefill tokens + one per
-            decode). Caps how long a step can take, so a burst of long prompts
-            cannot stall everybody's decoding for too long.
+            decode). Must be at least ``max_batch_size``.
+        chunked_prefill: allow a prefill to be split across several steps.
     """
 
     name = "continuous"
 
     def __init__(
-        self, kv: KVCacheManager, max_batch_size: int, max_tokens_per_step: int = 2048
+        self,
+        kv: KVCacheManager,
+        max_batch_size: int,
+        max_tokens_per_step: int = 2048,
+        chunked_prefill: bool = False,
     ) -> None:
         super().__init__(kv, max_batch_size)
+        if max_tokens_per_step < max_batch_size:
+            raise ValueError("max_tokens_per_step must be >= max_batch_size")
         self.max_tokens_per_step = max_tokens_per_step
+        self.chunked_prefill = chunked_prefill
 
     def validate(self, request: Request) -> None:
-        """Reject requests that could never fit in one step's token budget."""
-        if request.max_length > self.max_tokens_per_step:
+        """Without chunking, reject requests that could never fit in one step."""
+        if not self.chunked_prefill and request.max_length > self.max_tokens_per_step:
             raise ValueError("request is longer than max_tokens_per_step")
 
     def schedule(self) -> SchedulerOutput:
-        """Plan the decode batch, preempting if needed, then fill free seats."""
+        """Plan the decode batch (preempting if needed), then spend the rest on prefill."""
         out = SchedulerOutput()
 
-        # 1. Decode everyone already running, oldest first. Preempt from the back.
+        # 1. Decode everyone that is past prefill, oldest first. Preempt from the back.
         i = 0
         while i < len(self.running):
             req = self.running[i]
-            if self.kv.grow(req.request_id, req.length):
+            if req.needs_prefill:
+                i += 1
+            elif self.kv.grow(req.request_id, req.length):
                 out.decode.append(req)
                 i += 1
-                continue
-            victim = self.running[-1]
-            self._preempt(victim)
-            out.preempted.append(victim)
-            # If the victim was `req` itself the loop ends; otherwise retry `req`.
+            else:
+                victim = self.running[-1]
+                self._preempt(victim)
+                out.preempted.append(victim)
+                # If the victim was `req` itself the loop ends; otherwise retry `req`.
 
-        # 2. Admit new requests (FCFS) into free seats while budget and memory allow.
+        # 2. Continue prefills that are under way (only happens with chunking).
         budget = self.max_tokens_per_step - len(out.decode)
-        while self.waiting and len(self.running) < self.max_batch_size:
+        for req in self.running:
+            if budget == 0:
+                break
+            if req.needs_prefill:
+                budget -= self._add_prefill(out, req, budget)
+
+        # 3. Admit new requests (FCFS) into free seats while budget and memory allow.
+        while self.waiting and len(self.running) < self.max_batch_size and budget > 0:
             req = self.waiting[0]
             cost = req.length - self.kv.match_prefix(req.all_ids)  # cached tokens are free
-            if cost > budget or not self._admit(req):
+            if not self.chunked_prefill and cost > budget:
                 break
-            out.prefill.append(req)
-            budget -= cost
+            if not self._admit(req):
+                break
+            budget -= self._add_prefill(out, req, budget)
         return out
+
+    def _add_prefill(self, out: SchedulerOutput, request: Request, budget: int) -> int:
+        """Schedule the next prefill chunk of ``request`` within ``budget``. Returns its size."""
+        n = min(request.length - request.num_computed_tokens, budget)
+        out.prefill.append(request)
+        out.prefill_chunks[request.request_id] = n
+        return n
 
     def _preempt(self, request: Request) -> None:
         """Evict a running request back to the head of the waiting queue."""

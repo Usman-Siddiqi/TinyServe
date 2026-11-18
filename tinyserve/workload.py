@@ -41,6 +41,9 @@ class WorkloadSpec:
     With ``num_system_prompts > 0``, every prompt starts with one of that many
     shared "system prompts" (picked uniformly) followed by a unique user part of
     ``min_prompt_len..max_prompt_len`` characters, like a chat service would see.
+    A ``long_prompt_fraction`` of the requests instead get a prompt of
+    ``long_prompt_len`` characters (e.g. pasted documents), with the output
+    clipped so the whole sequence fits in ``max_total_len``.
     """
 
     num_requests: int = 200
@@ -71,6 +74,10 @@ class WorkloadSpec:
         }
         return cls(**(params | overrides))
 
+    long_prompt_fraction: float = 0.0
+    long_prompt_len: tuple[int, int] = (300, 450)
+    max_total_len: int = 500  # leaves room for BOS under max_seq_len=512
+
 
 def make_workload(spec: WorkloadSpec) -> list[WorkloadItem]:
     """Generate a reproducible list of requests sorted by arrival time."""
@@ -83,12 +90,16 @@ def make_workload(spec: WorkloadSpec) -> list[WorkloadItem]:
     items = []
     for _ in range(spec.num_requests):
         t += rng.expovariate(spec.rate)  # exponential gaps = Poisson arrivals
-        prompt_len = rng.randint(spec.min_prompt_len, spec.max_prompt_len)
+        if spec.long_prompt_fraction and rng.random() < spec.long_prompt_fraction:
+            prompt_len = rng.randint(*spec.long_prompt_len)
+        else:
+            prompt_len = rng.randint(spec.min_prompt_len, spec.max_prompt_len)
         prompt = _random_text(rng, prompt_len)
         if system_prompts:
             prompt = rng.choice(system_prompts) + prompt
         out = rng.lognormvariate(math.log(spec.median_output_len), spec.output_len_sigma)
-        max_tokens = int(min(max(out, spec.min_output_len), spec.max_output_len))
+        longest = min(spec.max_output_len, spec.max_total_len - len(prompt))
+        max_tokens = int(min(max(out, spec.min_output_len), longest))
         items.append(WorkloadItem(arrival=t, prompt=prompt, max_tokens=max_tokens))
     return items
 

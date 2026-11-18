@@ -17,6 +17,7 @@ serving system itself rather than JSON encoding and socket overhead.
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import platform
@@ -113,6 +114,9 @@ def summarize(engine: Engine, requests: list[Request], t0: float, t_end: float) 
         for r in requests
         if r.finish_time is not None and r.first_token_time is not None and len(r.output_ids) > 1
     ]
+    # Inter-token latency: every gap between consecutive tokens of one request,
+    # pooled over all requests. Its tail shows decode stalls behind long prefills.
+    itls = [b - a for r in requests for a, b in itertools.pairwise(r.token_times)]
     tokens = sum(len(r.output_ids) for r in requests)
     makespan = t_end - t0
 
@@ -135,6 +139,12 @@ def summarize(engine: Engine, requests: list[Request], t0: float, t_end: float) 
         "ttft_p50_s": percentile(ttfts, 50),
         "ttft_p95_s": percentile(ttfts, 95),
         "tpot_p50_ms": percentile(tpots, 50) * 1000,
+        "tpot_p95_ms": percentile(tpots, 95) * 1000,
+        "tpot_p99_ms": percentile(tpots, 99) * 1000,
+        "itl_p50_ms": percentile(itls, 50) * 1000,
+        "itl_p95_ms": percentile(itls, 95) * 1000,
+        "itl_p99_ms": percentile(itls, 99) * 1000,
+        "itl_max_ms": max(itls, default=0.0) * 1000,
         "num_steps": len(trace),
         "mean_batch_size": tw([s.num_prefill + s.num_decode for s in trace]),
         "max_batch_size": max(s.num_prefill + s.num_decode for s in trace),
@@ -252,6 +262,7 @@ def main() -> None:
             "kv_capacity_tokens": base.kv_capacity_tokens,
             "max_batch_size": base.max_batch_size,
             "max_tokens_per_step": base.max_tokens_per_step,
+            "chunked_prefill": base.chunked_prefill,
             "block_size": base.block_size,
             "model": asdict(base.model),
             "kv_bytes_per_token": base.model.kv_bytes_per_token(),

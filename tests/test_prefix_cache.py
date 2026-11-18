@@ -307,3 +307,16 @@ def test_shared_prefix_workload() -> None:
     assert len(prefixes) == 3
     assert len({it.prompt for it in items}) == 40
     assert all(len(it.prompt) + 1 + it.max_tokens <= 512 for it in items)
+
+
+def test_prefix_caching_with_chunked_prefill(model: TinyGPT) -> None:
+    """Cached prefixes and 16-token prefill chunks together, under memory pressure."""
+    prompts = shared_prefix_prompts(6, prefix_len=24)
+    params = SamplingParams(max_new_tokens=24, ignore_eos=True)
+    kv = PrefixCachingKVCache(pool(160), block_size=8, watermark=0)
+    sched = ContinuousScheduler(kv, max_batch_size=6, max_tokens_per_step=16, chunked_prefill=True)
+    engine = Engine(model, sched)
+    for req, prompt in zip(engine.generate(prompts, params), prompts, strict=True):
+        assert req.output_ids == reference_generate(model, prompt, params)
+    assert kv.prefix_cache_stats().hit_tokens > 0
+    assert_all_memory_released(kv)
