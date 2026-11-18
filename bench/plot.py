@@ -231,14 +231,6 @@ POLICY_LABELS = {
     "slo": "Shortest feasible job first",
 }
 
-MEASURED_MARKER: dict[str, Any] = {
-    "linestyle": "none",
-    "marker": "D",
-    "markersize": 8,
-    "markerfacecolor": "none",
-    "markeredgewidth": 1.5,
-}
-
 
 def sweep_medians(sweep: dict[str, Any]) -> dict[str, dict[float, dict[str, float]]]:
     """policy -> load -> metric -> median over the seeds and repeats of that point.
@@ -259,23 +251,18 @@ def sweep_medians(sweep: dict[str, Any]) -> dict[str, dict[float, dict[str, floa
     }
 
 
-def plot_goodput(sweep: dict[str, Any], out: Path, measured: dict[str, Any] | None = None) -> None:
-    """Goodput, SLO attainment and p99 latency vs. offered load, one line per policy.
-
-    ``measured``, if given, is a real-mode sweep drawn as open markers over the lines.
-    """
+def plot_goodput(sweep: dict[str, Any], out: Path) -> None:
+    """Goodput, SLO attainment and their latency cost vs. offered load, one line per policy."""
     med = sweep_medians(sweep)
-    real = sweep_medians(measured) if measured else {}
     cfg = sweep["config"]
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4.4))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.4))
     loads = sorted({p["load"] for p in sweep["points"]})
-    axes[0].plot(
-        loads, loads, color=INK_2, linewidth=1, linestyle=":", label="every request on time"
-    )
+    axes[0, 0].plot(loads, loads, color=INK_2, linewidth=1, linestyle=":", label="all on time")
     panels = (
-        (axes[0], "goodput_norm", "Goodput", "on-time requests / s, x capacity"),
-        (axes[1], "slo_attainment", "SLO attainment", "fraction of requests on time"),
-        (axes[2], "latency_p99_s", "The price: p99 latency", "seconds"),
+        (axes[0, 0], "goodput_norm", "Goodput", "on-time requests / s (x capacity)"),
+        (axes[0, 1], "slo_attainment", "SLO attainment", "fraction of requests on time"),
+        (axes[1, 0], "latency_p99_s", "Price 1: p99 latency", "seconds"),
+        (axes[1, 1], "long10_latency_p50_s", "Price 2: longest 10% of jobs", "median latency (s)"),
     )
     for ax, key, title, ylabel in panels:
         for policy in POLICY_COLORS:
@@ -285,30 +272,55 @@ def plot_goodput(sweep: dict[str, Any], out: Path, measured: dict[str, Any] | No
                 ax.plot(
                     xs, ys, marker="o", color=POLICY_COLORS[policy], label=POLICY_LABELS[policy]
                 )
-            if policy in real:
-                xs = list(real[policy])
-                ys = [real[policy][x][key] for x in xs]
-                ax.plot(xs, ys, color=POLICY_COLORS[policy], **MEASURED_MARKER)
         ax.set_title(title)
-        ax.set_xlabel("offered load (x capacity)")
         ax.set_ylabel(ylabel)
-    axes[1].set_ylim(0, 1.05)
-    axes[1].axhline(0.9, color=INK_2, linewidth=0.8, linestyle=":")
-    if real:
-        axes[1].plot([], [], color=INK_2, label="measured on the real engine", **MEASURED_MARKER)
-        axes[1].legend(loc="lower left")
-    axes[0].legend(loc="upper left")
-    source = (
-        "simulated with a cost model fitted to the engine"
-        if sweep["points"][0]["mode"] == "sim"
-        else "measured"
-    )
+    for ax in axes[1]:
+        ax.set_xlabel("offered load (x capacity)")
+    axes[0, 0].set_ylim(0, 1.3)
+    axes[0, 1].set_ylim(0, 1.05)
+    axes[0, 1].axhline(0.9, color=INK_2, linewidth=0.8, linestyle=":")
+    axes[0, 0].legend(loc="upper right")
+    source = "Simulated" if sweep["points"][0]["mode"] == "sim" else "Measured"
     subtitle(
         fig,
         f"SLO: TTFT <= {cfg['ttft_slo_s']:g} s and time per output token <= "
-        f"{cfg['tpot_slo_s'] * 1000:g} ms. Lines: {source}, "
-        f"{sweep['points'][0]['num_requests']} requests per point, median over seeds. "
-        "Continuous batching + paged KV.",
+        f"{cfg['tpot_slo_s'] * 1000:g} ms. {source}, {sweep['points'][0]['num_requests']} "
+        "requests per point, median over seeds. Continuous batching + paged KV.",
+    )
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+
+
+def plot_sim_check(measured: dict[str, Any], out: Path) -> None:
+    """Each real run vs. the simulator replaying it with that run's own fitted step costs."""
+    pts = [p for p in measured["points"] if "sim_summary" in p]
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.2))
+    panels = (
+        (axes[0], "slo_attainment", "SLO attainment"),
+        (axes[1], "ttft_p99_s", "p99 TTFT (s)"),
+        (axes[2], "latency_p99_s", "p99 latency (s)"),
+    )
+    for ax, key, title in panels:
+        real = [p["summary"][key] for p in pts]
+        sim = [p["sim_summary"][key] for p in pts]
+        hi = max(*real, *sim) * 1.08
+        ax.plot([0, hi], [0, hi], color=INK_2, linewidth=1, linestyle=":")
+        for policy in POLICY_COLORS:
+            xy = [(p["summary"][key], p["sim_summary"][key]) for p in pts if p["policy"] == policy]
+            if xy:
+                xs, ys = zip(*xy, strict=True)
+                ax.scatter(xs, ys, color=POLICY_COLORS[policy], label=POLICY_LABELS[policy])
+        ax.set_xlim(0, hi)
+        ax.set_ylim(0, hi)
+        ax.set_title(title)
+        ax.set_xlabel("measured")
+    axes[0].set_ylabel("simulated")
+    axes[0].legend(loc="upper left")
+    subtitle(
+        fig,
+        f"{len(pts)} real runs, each replayed in the simulator with a step cost model fitted "
+        "to that run's own trace. On the dotted line the simulator is exact.",
     )
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig(out, dpi=150)
@@ -398,7 +410,9 @@ def main() -> None:
     real = json.loads(args.sweep.read_text()) if args.sweep.exists() else None
     sim = json.loads(args.sweep_sim.read_text()) if args.sweep_sim.exists() else None
     if sim or real:
-        plot_goodput(sim or real, args.out_dir / "goodput.png", measured=real if sim else None)
+        plot_goodput(sim or real, args.out_dir / "goodput.png")
+    if real:
+        plot_sim_check(real, args.out_dir / "sim_check.png")
     for path, sweep in ((args.sweep, real), (args.sweep_sim, sim)):
         if sweep:
             table = sweep_table(sweep)
