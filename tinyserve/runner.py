@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import torch
 
+from tinyserve.attention import resolve_backend
 from tinyserve.kv_cache import KVCacheManager
 from tinyserve.model import TinyGPT
 from tinyserve.request import Request
@@ -25,11 +26,19 @@ from tinyserve.tokenizer import PAD_ID
 
 
 class ModelRunner:
-    """Builds padded input tensors, runs the model, and samples next tokens."""
+    """Builds padded input tensors, runs the model, and samples next tokens.
 
-    def __init__(self, model: TinyGPT, kv: KVCacheManager) -> None:
+    Args:
+        model: the transformer.
+        kv: the KV cache manager.
+        attention: decode attention backend, ``"torch"`` or ``"cpp"`` (see
+            :func:`tinyserve.attention.resolve_backend`). Prefill always uses torch.
+    """
+
+    def __init__(self, model: TinyGPT, kv: KVCacheManager, attention: str | None = None) -> None:
         self.model = model
         self.kv = kv
+        self.attention = resolve_backend(attention)
 
     @torch.inference_mode()
     def prefill(
@@ -79,6 +88,11 @@ class ModelRunner:
         positions = torch.tensor([[r.length - 1] for r in requests])
         valid = torch.ones_like(input_ids, dtype=torch.bool)
 
-        kv = self.kv.build_batch([r.request_id for r in requests], positions, valid)
+        kv = self.kv.build_batch(
+            [r.request_id for r in requests],
+            positions,
+            valid,
+            paged_attention=self.attention == "cpp" and self.kv.pool.k.dtype == torch.float32,
+        )
         hidden = self.model.hidden_states(input_ids, positions, kv)
         return sample(self.model.logits(hidden[:, 0]), requests)

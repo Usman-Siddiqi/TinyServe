@@ -155,12 +155,20 @@ class KVBatch:
         groups: rows bucketed by context length. Attention is computed per group,
             so a 20-token sequence is not padded out to the 450-token one that
             happens to share its batch (see :meth:`KVCacheManager.build_batch`).
+            Empty when the batch is built for the paged-attention kernel.
+        block_tables: ``(B, W)`` physical block of each logical block, set only
+            for the paged-attention kernel, which reads the pool directly.
+        context_lens: ``(B,)`` tokens each row attends to (with ``block_tables``).
+        block_size: tokens per block (with ``block_tables``).
     """
 
     pool: KVPool
     write_rows: Tensor
     write_slots: Tensor
     groups: list[AttentionGroup]
+    block_tables: Tensor | None = None
+    context_lens: Tensor | None = None
+    block_size: int = 0
 
     def write(self, layer: int, k: Tensor, v: Tensor) -> None:
         """Store the new ``(B, S, H, D)`` keys/values at their slots."""
@@ -328,7 +336,12 @@ class KVCacheManager(ABC):
         return table.gather(1, logical_block) * self.block_size + positions % self.block_size
 
     def build_batch(
-        self, seq_ids: list[int], positions: Tensor, valid: Tensor, group_size: int = 8
+        self,
+        seq_ids: list[int],
+        positions: Tensor,
+        valid: Tensor,
+        group_size: int = 8,
+        paged_attention: bool = False,
     ) -> KVBatch:
         """Build the :class:`KVBatch` for one forward pass.
 
@@ -337,20 +350,26 @@ class KVCacheManager(ABC):
         lengths range from a few tokens to hundreds, so padding everyone to the
         maximum can double the memory traffic. Instead, rows are sorted by context
         length and attended in groups of ``group_size``, each padded only to its
-        own longest member. (Real engines use variable-length attention kernels
-        that need no padding at all; grouping gets most of the benefit in plain
-        PyTorch.)
+        own longest member. With ``paged_attention=True`` the batch instead
+        carries block tables for the fused C++ decode kernel, which reads the pool
+        directly and needs no gather or padding at all.
 
         Args:
             seq_ids: the sequences in the batch, one per row.
             positions: ``(B, S)`` absolute positions of the new tokens.
             valid: ``(B, S)`` bool, False for padding.
             group_size: rows per attention group.
+            paged_attention: describe the batch with block tables for the fused
+                kernel instead of gather groups.
         """
         table = self.block_table(seq_ids)  # built once; groups slice their rows from it
         write_slots = self._slots(table, positions)[valid]
         write_rows = valid.flatten().nonzero().squeeze(1)
         context_lens = (positions * valid).amax(dim=1) + 1
+        if paged_attention:
+            return KVBatch(
+                self.pool, write_rows, write_slots, [], table, context_lens, self.block_size
+            )
         order = torch.argsort(context_lens, descending=True, stable=True)
         groups = []
         for rows in order.split(group_size):

@@ -78,6 +78,7 @@ class Engine:
         scheduler: decides who runs each step; owns the KV cache manager.
         clock: time source, in seconds. Injectable for tests.
         record_trace: keep a :class:`StepTrace` for every step in ``self.trace``.
+        attention: decode attention backend (see :class:`ModelRunner`).
     """
 
     def __init__(
@@ -86,10 +87,11 @@ class Engine:
         scheduler: Scheduler,
         clock: Callable[[], float] = time.perf_counter,
         record_trace: bool = False,
+        attention: str | None = None,
     ) -> None:
         self.model = model
         self.scheduler = scheduler
-        self.runner = ModelRunner(model, scheduler.kv)
+        self.runner = ModelRunner(model, scheduler.kv, attention)
         self.clock = clock
         self.record_trace = record_trace
         self.trace: list[StepTrace] = []
@@ -222,6 +224,8 @@ class EngineConfig:
         kv_memory_bytes: if set, size the pool by bytes instead of
             ``kv_capacity_tokens``, so a smaller ``kv_dtype`` gets more slots.
         kv_smooth_keys: for ``int8``, calibrate per-channel key smoothing at startup.
+        attention: decode attention backend, ``"torch"`` or ``"cpp"``. None reads
+            ``$TINYSERVE_ATTENTION`` and defaults to ``"torch"``.
     """
 
     strategy: str = "naive"
@@ -240,6 +244,7 @@ class EngineConfig:
     kv_dtype: str = "float32"
     kv_memory_bytes: int | None = None
     kv_smooth_keys: bool = True
+    attention: str | None = None
 
     @property
     def num_kv_slots(self) -> int:
@@ -307,4 +312,4 @@ def build_engine(cfg: EngineConfig, record_trace: bool = False) -> Engine:
             chunked_prefill=cfg.chunked_prefill,
             policy=policy,
         )
-    return Engine(model, scheduler, record_trace=record_trace)
+    return Engine(model, scheduler, record_trace=record_trace, attention=cfg.attention)

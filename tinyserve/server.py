@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from tinyserve.async_engine import AsyncEngine
+from tinyserve.attention import ATTENTION_BACKENDS
 from tinyserve.engine import KV_LAYOUTS, STRATEGIES, EngineConfig, StepOutput, build_engine
 from tinyserve.kv_quant import KV_DTYPES
 from tinyserve.policy import POLICIES
@@ -169,6 +170,9 @@ def main() -> None:
     parser.add_argument("--queue-policy", choices=POLICIES, default="fcfs")
     parser.add_argument("--ttft-slo", type=float, default=1.0, help="seconds, for edf policies")
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
+    parser.add_argument(
+        "--attention", choices=ATTENTION_BACKENDS, default=None, help="decode attention backend"
+    )
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
         args.kv_layout = "contiguous"  # paged needs preemption, which only continuous has
@@ -189,6 +193,7 @@ def main() -> None:
         num_threads=args.threads,
         kv_dtype=args.kv_dtype,
         kv_memory_bytes=None if args.kv_memory_mib is None else int(args.kv_memory_mib * 2**20),
+        attention=args.attention,
     )
     uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
 

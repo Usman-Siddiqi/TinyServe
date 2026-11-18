@@ -21,6 +21,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
+from tinyserve.attention import paged_attention_decode
 from tinyserve.kv_cache import KVBatch, KVPool
 from tinyserve.tokenizer import CharTokenizer
 
@@ -90,6 +91,19 @@ class Attention(nn.Module):
         if kv is None:
             mask = positions[:, None, :] <= positions[:, :, None]  # (B, S, S)
             out = self._attend(q, k, v, mask[:, None])
+        elif kv.block_tables is not None:
+            # Fused kernel: attend straight out of the pool, no gather or padding.
+            if s != 1:
+                raise ValueError("the paged-attention kernel handles one token per sequence")
+            kv.write(self.layer_idx, k, v)
+            out = paged_attention_decode(
+                q[:, 0],
+                kv.pool.k[self.layer_idx],
+                kv.pool.v[self.layer_idx],
+                kv.block_tables,
+                kv.context_lens,
+                kv.block_size,
+            )[:, None]
         else:
             # Write the new keys/values into the cache, then read each sequence's
             # full history (old tokens + the ones just written) back and attend.

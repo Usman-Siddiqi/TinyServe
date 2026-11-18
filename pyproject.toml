@@ -28,6 +28,7 @@ dependencies = [
 dev = [
     "pytest==9.2.0",
     "ruff==0.17.5",
+    "ninja==1.13.0",  # builds the optional C++ attention kernel
 ]
 bench = [
     "numpy==2.5.5",
@@ -41,6 +42,9 @@ tinyserve-loadgen = "tinyserve.loadgen:main"
 
 [tool.setuptools.packages.find]
 include = ["tinyserve*"]
+
+[tool.setuptools.package-data]
+tinyserve = ["csrc/*.cpp"]
 
 [tool.ruff]
 line-length = 100
