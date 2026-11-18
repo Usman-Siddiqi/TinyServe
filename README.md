@@ -180,6 +180,7 @@ tinyserve/
   model.py         TinyGPT: decoder-only transformer whose attention reads an external KV cache
   tokenizer.py     printable-ASCII character tokenizer
   kv_cache.py      KV pool, contiguous and paged cache managers, block allocator
+  kv_quant.py      KV storage formats: float32, bfloat16, int8 with per-token scales
   request.py       requests, sampling params, per-request timing metrics
   sampler.py       greedy / temperature sampling with per-request RNGs
   runner.py        builds padded prefill and decode batches, runs the model
@@ -257,7 +258,7 @@ The engine is synchronous PyTorch, so it runs in one background thread looping `
 - [ ] **C++ paged-attention kernel**: read K/V straight from the blocks instead of gathering them into a temporary tensor.
 - [ ] **Preemption by swapping**: move a victim's blocks to a CPU-side pool instead of recomputing them.
 - [ ] Chunked prefill, so long prompts never stall decoding.
-- [ ] A bf16 KV cache to halve memory traffic.
+- [x] A bf16 or int8 KV cache: `--kv-dtype bfloat16|int8`, plus `--kv-memory-mib` to size the pool in bytes so smaller dtypes fit 2x or 3.76x the tokens.
 
 ## License
 
