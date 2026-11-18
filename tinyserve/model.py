@@ -89,7 +89,8 @@ class Attention(nn.Module):
         v = v.view(b, s, self.n_kv_heads, self.head_dim)
 
         if kv is None:
-            out = self._attend(q, k, v, positions, positions)
+            mask = positions[:, None, :] <= positions[:, :, None]  # (B, S, S)
+            out = self._attend(q, k, v, mask[:, None])
         else:
             # Write the new keys/values into the cache, then read each sequence's
             # full history (old tokens + the ones just written) back and attend.
@@ -97,30 +98,22 @@ class Attention(nn.Module):
             out = torch.empty_like(q)
             for group in kv.groups:
                 keys, values = kv.read(self.layer_idx, group.read_slots)
-                key_positions = torch.arange(keys.shape[1], device=x.device)
-                out[group.rows] = self._attend(
-                    q[group.rows], keys, values, positions[group.rows], key_positions
-                )
+                out[group.rows] = self._attend(q[group.rows], keys, values, group.mask)
         return self.out(out.reshape(b, s, -1))
 
     @staticmethod
-    def _attend(
-        q: Tensor, keys: Tensor, values: Tensor, q_positions: Tensor, key_positions: Tensor
-    ) -> Tensor:
-        """Causal attention of ``(B, S, H, D)`` queries over ``(B, L, H, D)`` keys/values.
+    def _attend(q: Tensor, keys: Tensor, values: Tensor, mask: Tensor) -> Tensor:
+        """Attention of ``(B, S, H, D)`` queries over ``(B, L, H, D)`` keys/values.
 
-        The mask comes from absolute positions: a query at position ``p`` may see
-        keys at positions ``<= p``. This one rule also hides padding and stale
-        cache entries, because those always sit beyond the sequence's current length.
+        ``mask`` is ``(B, 1, S, L)``, True where a query may see a key. It comes
+        from absolute positions (a query at position ``p`` sees keys at ``<= p``),
+        which also hides padding and stale cache entries.
         """
-        if key_positions.dim() == 1:
-            key_positions = key_positions.expand(q.shape[0], -1)
-        mask = key_positions[:, None, :] <= q_positions[:, :, None]  # (B, S, L)
         out = F.scaled_dot_product_attention(
             q.transpose(1, 2),  # (B, H, S, D)
             keys.transpose(1, 2),  # (B, H, L, D)
             values.transpose(1, 2),
-            attn_mask=mask[:, None, :, :],
+            attn_mask=mask,
             enable_gqa=True,
         )
         return out.transpose(1, 2)  # (B, S, H, D)

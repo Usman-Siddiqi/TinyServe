@@ -12,13 +12,14 @@ This module splits the problem in two:
 * A :class:`KVCacheManager` owns the bookkeeping: which slots belong to which
   sequence. It turns "token ``j`` of sequence ``s``" into a physical slot address.
 
-The only thing that differs between memory layouts is that address function:
+Both layouts use the same address function, ``block_table[j // B] * B + j % B``,
+and differ only in their block size ``B`` and in who gets which block:
 
-* :class:`ContiguousKVCache` gives each sequence one slab of ``max_seq_len``
-  slots up front, so ``address = row * max_seq_len + j``.
 * :class:`PagedKVCache` hands out small fixed-size blocks on demand, like the
-  pages of virtual memory (and vLLM's PagedAttention), so
-  ``address = block_table[j // B] * B + j % B``.
+  pages of virtual memory (and vLLM's PagedAttention).
+* :class:`ContiguousKVCache` gives each sequence one slab of ``max_seq_len``
+  slots up front: a single block with ``B = max_seq_len``, so the address is
+  simply ``row * max_seq_len + j``.
 """
 
 from __future__ import annotations
@@ -62,11 +63,14 @@ class AttentionGroup:
         read_slots: ``(G, L)`` slot address of token ``j`` of each row's sequence,
             for ``j < L``, where ``L`` is the longest context in the group.
             Entries beyond a sequence's length point at harmless garbage; the
-            causal mask in attention hides them.
+            causal mask hides them.
+        mask: ``(G, 1, S, L)`` bool, True where query ``i`` may see key ``j``.
+            Built once per step and shared by every layer.
     """
 
     rows: Tensor
     read_slots: Tensor
+    mask: Tensor
 
 
 @dataclass
@@ -75,27 +79,35 @@ class KVBatch:
 
     Attributes:
         pool: the physical storage.
-        write_mask: ``(B, S)`` bool, True for real (non-padding) new tokens.
-        write_slots: ``(N,)`` slot address for each True entry of ``write_mask``,
-            in row-major order.
+        write_rows: ``(N,)`` indices of the real (non-padding) new tokens in the
+            flattened ``(B * S)`` batch.
+        write_slots: ``(N,)`` slot address for each entry of ``write_rows``.
         groups: rows bucketed by context length. Attention is computed per group,
             so a 20-token sequence is not padded out to the 450-token one that
             happens to share its batch (see :meth:`KVCacheManager.build_batch`).
     """
 
     pool: KVPool
-    write_mask: Tensor
+    write_rows: Tensor
     write_slots: Tensor
     groups: list[AttentionGroup]
 
+    # index_copy_/index_select do the same as ``pool[slots]`` indexing, but on CPU
+    # they are several times faster than general advanced indexing.
+
     def write(self, layer: int, k: Tensor, v: Tensor) -> None:
         """Store the new ``(B, S, H, D)`` keys/values at their slots."""
-        self.pool.k[layer][self.write_slots] = k[self.write_mask]
-        self.pool.v[layer][self.write_slots] = v[self.write_mask]
+        for pool, new in ((self.pool.k[layer], k), (self.pool.v[layer], v)):
+            rows = new.flatten(0, 1).index_select(0, self.write_rows)
+            pool.index_copy_(0, self.write_slots, rows)
 
     def read(self, layer: int, read_slots: Tensor) -> tuple[Tensor, Tensor]:
         """Gather keys/values at ``read_slots`` ``(G, L)`` into dense ``(G, L, H, D)`` tensors."""
-        return self.pool.k[layer][read_slots], self.pool.v[layer][read_slots]
+        flat = read_slots.flatten()
+        shape = (*read_slots.shape, *self.pool.k.shape[2:])
+        k = self.pool.k[layer].index_select(0, flat).view(shape)
+        v = self.pool.v[layer].index_select(0, flat).view(shape)
+        return k, v
 
 
 @dataclass(frozen=True)
@@ -134,13 +146,15 @@ class KVCacheManager(ABC):
     The engine calls :meth:`allocate` when a sequence is admitted, :meth:`grow`
     before each step that adds tokens, and :meth:`free` when it finishes or is
     preempted. :meth:`build_batch` turns a batch of sequences and positions into
-    the :class:`KVBatch` the model consumes.
+    the :class:`KVBatch` the model consumes. Subclasses choose a ``block_size``
+    and implement :meth:`block_table`.
     """
 
     layout = "base"
 
-    def __init__(self, pool: KVPool) -> None:
+    def __init__(self, pool: KVPool, block_size: int) -> None:
         self.pool = pool
+        self.block_size = block_size
         self._lengths: dict[int, int] = {}
 
     # --- allocation -------------------------------------------------------------
@@ -192,8 +206,17 @@ class KVCacheManager(ABC):
     # --- addressing -------------------------------------------------------------
 
     @abstractmethod
+    def block_table(self, seq_ids: list[int]) -> Tensor:
+        """``(B, W)`` physical block ids of each sequence, right-padded with zeros."""
+
     def addresses(self, seq_ids: list[int], positions: Tensor) -> Tensor:
         """Map ``positions[b, j]`` of sequence ``seq_ids[b]`` to physical slot indices."""
+        return self._slots(self.block_table(seq_ids), positions)
+
+    def _slots(self, table: Tensor, positions: Tensor) -> Tensor:
+        """``table[b, pos // block_size] * block_size + pos % block_size``."""
+        logical_block = (positions // self.block_size).clamp(max=table.shape[1] - 1)
+        return table.gather(1, logical_block) * self.block_size + positions % self.block_size
 
     def build_batch(
         self, seq_ids: list[int], positions: Tensor, valid: Tensor, group_size: int = 8
@@ -215,16 +238,19 @@ class KVCacheManager(ABC):
             valid: ``(B, S)`` bool, False for padding.
             group_size: rows per attention group.
         """
-        write_slots = self.addresses(seq_ids, positions)[valid]
+        table = self.block_table(seq_ids)  # built once; groups slice their rows from it
+        write_slots = self._slots(table, positions)[valid]
+        write_rows = valid.flatten().nonzero().squeeze(1)
         context_lens = (positions * valid).amax(dim=1) + 1
         order = torch.argsort(context_lens, descending=True, stable=True)
         groups = []
         for rows in order.split(group_size):
-            length = int(context_lens[rows[0]])
-            group_ids = [seq_ids[i] for i in rows.tolist()]
-            all_positions = torch.arange(length).expand(len(group_ids), -1)
-            groups.append(AttentionGroup(rows, self.addresses(group_ids, all_positions)))
-        return KVBatch(self.pool, valid, write_slots, groups)
+            key_positions = torch.arange(int(context_lens[rows[0]]))
+            read_slots = self._slots(table[rows], key_positions.expand(len(rows), -1))
+            # Causal by absolute position, which also hides padding and stale slots.
+            mask = key_positions <= positions[rows][:, :, None]  # (G, S, L)
+            groups.append(AttentionGroup(rows, read_slots, mask[:, None]))
+        return KVBatch(self.pool, write_rows, write_slots, groups)
 
     # --- accounting -------------------------------------------------------------
 
@@ -254,7 +280,7 @@ class ContiguousKVCache(KVCacheManager):
     layout = "contiguous"
 
     def __init__(self, pool: KVPool, max_seq_len: int) -> None:
-        super().__init__(pool)
+        super().__init__(pool, block_size=max_seq_len)
         self.max_seq_len = max_seq_len
         self.num_rows = pool.num_slots // max_seq_len
         if self.num_rows == 0:
@@ -280,10 +306,9 @@ class ContiguousKVCache(KVCacheManager):
         """The slab index owned by ``seq_id``."""
         return self._row_of[seq_id]
 
-    def addresses(self, seq_ids: list[int], positions: Tensor) -> Tensor:
-        """``row * max_seq_len + position``."""
-        rows = torch.tensor([self._row_of[s] for s in seq_ids], dtype=torch.long)
-        return rows[:, None] * self.max_seq_len + positions
+    def block_table(self, seq_ids: list[int]) -> Tensor:
+        """A single block per sequence: its slab."""
+        return torch.tensor([[self._row_of[s]] for s in seq_ids], dtype=torch.long)
 
     def reserved_tokens(self) -> int:
         """Each live sequence pins a full slab."""
@@ -359,8 +384,7 @@ class PagedKVCache(KVCacheManager):
     layout = "paged"
 
     def __init__(self, pool: KVPool, block_size: int = 16, watermark: float = 0.01) -> None:
-        super().__init__(pool)
-        self.block_size = block_size
+        super().__init__(pool, block_size)
         self.allocator = BlockAllocator(pool.num_slots // block_size)
         self.watermark_blocks = int(watermark * self.allocator.num_blocks)
         self.block_tables: dict[int, list[int]] = {}
@@ -391,15 +415,11 @@ class PagedKVCache(KVCacheManager):
         for block in self.block_tables.pop(seq_id):
             self.allocator.free(block)
 
-    def addresses(self, seq_ids: list[int], positions: Tensor) -> Tensor:
-        """``block_table[pos // block_size] * block_size + pos % block_size``."""
+    def block_table(self, seq_ids: list[int]) -> Tensor:
+        """Each sequence's block list, padded to the longest one."""
         tables = [self.block_tables[s] for s in seq_ids]
         width = max(len(t) for t in tables)
-        padded = torch.zeros(len(tables), width, dtype=torch.long)
-        for i, t in enumerate(tables):
-            padded[i, : len(t)] = torch.tensor(t)
-        logical_block = (positions // self.block_size).clamp(max=width - 1)
-        return padded.gather(1, logical_block) * self.block_size + positions % self.block_size
+        return torch.tensor([t + [0] * (width - len(t)) for t in tables], dtype=torch.long)
 
     def reserved_tokens(self) -> int:
         """Every allocated block counts in full."""

@@ -52,9 +52,7 @@ class ModelRunner:
         ]
         lengths = torch.tensor(num_tokens)
         width = int(lengths.max())
-        input_ids = torch.full((len(chunks), width), PAD_ID, dtype=torch.long)
-        for i, c in enumerate(chunks):
-            input_ids[i, : len(c)] = torch.tensor(c)
+        input_ids = torch.tensor([c + [PAD_ID] * (width - len(c)) for c in chunks])
         arange = torch.arange(width).expand(len(chunks), -1)
         valid = arange < lengths[:, None]
         # Absolute positions; padding gets position 0 and is never written.
