@@ -144,6 +144,10 @@ def main() -> None:
     parser.add_argument("--max-batch-size", type=int, default=32)
     parser.add_argument("--kv-capacity-tokens", type=int, default=8192)
     parser.add_argument("--block-size", type=int, default=16)
+    parser.add_argument("--max-tokens-per-step", type=int, default=2048)
+    parser.add_argument(
+        "--chunked-prefill", action="store_true", help="split long prefills across steps"
+    )
     parser.add_argument("--threads", type=int, default=None, help="PyTorch CPU threads")
     args = parser.parse_args()
     if args.strategy != "continuous" and args.kv_layout == "paged":
@@ -155,6 +159,8 @@ def main() -> None:
         max_batch_size=args.max_batch_size,
         kv_layout=args.kv_layout,
         block_size=args.block_size,
+        max_tokens_per_step=args.max_tokens_per_step,
+        chunked_prefill=args.chunked_prefill,
         num_threads=args.threads,
     )
     uvicorn.run(create_app(config), host=args.host, port=args.port, log_level="info")
