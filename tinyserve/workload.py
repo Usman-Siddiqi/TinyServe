@@ -36,6 +36,10 @@ class WorkloadSpec:
     Output lengths follow a clipped log-normal distribution: most answers are
     short, a few are very long. That long tail is exactly what hurts static
     batching, where everyone waits for the longest request in the batch.
+
+    A ``long_prompt_fraction`` of the requests instead get a prompt of
+    ``long_prompt_len`` characters (e.g. pasted documents), with the output
+    clipped so the whole sequence fits in ``max_total_len``.
     """
 
     num_requests: int = 200
@@ -47,6 +51,9 @@ class WorkloadSpec:
     output_len_sigma: float = 0.8
     min_output_len: int = 8
     max_output_len: int = 300
+    long_prompt_fraction: float = 0.0
+    long_prompt_len: tuple[int, int] = (300, 450)
+    max_total_len: int = 500  # leaves room for BOS under max_seq_len=512
 
 
 def make_workload(spec: WorkloadSpec) -> list[WorkloadItem]:
@@ -56,9 +63,14 @@ def make_workload(spec: WorkloadSpec) -> list[WorkloadItem]:
     items = []
     for _ in range(spec.num_requests):
         t += rng.expovariate(spec.rate)  # exponential gaps = Poisson arrivals
-        prompt_len = rng.randint(spec.min_prompt_len, spec.max_prompt_len)
+        # Only draw the extra random number when enabled, so default workloads stay identical.
+        if spec.long_prompt_fraction and rng.random() < spec.long_prompt_fraction:
+            prompt_len = rng.randint(*spec.long_prompt_len)
+        else:
+            prompt_len = rng.randint(spec.min_prompt_len, spec.max_prompt_len)
         prompt = "".join(rng.choice(_ALPHABET) for _ in range(prompt_len))
         out = rng.lognormvariate(math.log(spec.median_output_len), spec.output_len_sigma)
-        max_tokens = int(min(max(out, spec.min_output_len), spec.max_output_len))
+        longest = min(spec.max_output_len, spec.max_total_len - prompt_len)
+        max_tokens = int(min(max(out, spec.min_output_len), longest))
         items.append(WorkloadItem(arrival=t, prompt=prompt, max_tokens=max_tokens))
     return items
